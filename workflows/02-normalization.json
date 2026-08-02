@@ -1,0 +1,98 @@
+{
+  "name": "02-normalization",
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\n\n// --- 1. Limpieza de HTML/entities en el contenido ---\nfunction stripHtml(raw) {\n  if (!raw) return '';\n  let text = raw\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/\\s+/g, ' ')\n    .trim();\n  return text;\n}\n\nconst cleanContent = stripHtml(item.raw_summary || '');\nconst cleanTitle = stripHtml(item.title || '');\n\n// --- 2. Normalización de fecha a ISO 8601 UTC ---\n// published_date ya viene en formato ISO (ej: \"2026-07-12T03:40:00.000Z\"),\n// pero seguimos validando en vez de asumir que SIEMPRE será así.\nlet publishedAt = null;\nif (item.published_date) {\n  const dt = DateTime.fromISO(item.published_date, { zone: 'utc' });\n  publishedAt = dt.isValid ? dt.toISO() : null;\n}\n\n// --- 3. Limpieza de URL (quitar parámetros de tracking) ---\nlet cleanLink = item.link || '';\ntry {\n  const url = new URL(cleanLink);\n  const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ref', 'fbclid'];\n  trackingParams.forEach(p => url.searchParams.delete(p));\n  cleanLink = url.toString();\n} catch (e) {\n  // link inválido o vacío\n}\n\n// --- 4. Idioma ---\nconst languageBySource = {\n  'El País': 'es',\n  'elDiario.es': 'es',\n  'El Mundo': 'es',\n  'ABC': 'es'\n};\nconst language = languageBySource[item.source_name] || 'unknown';\n\nreturn {\n  json: {\n    ...item,\n    title: cleanTitle,\n    content: cleanContent,\n    published_date: publishedAt,\n    link: cleanLink,\n    language,\n    normalization_valid: !!(cleanTitle && publishedAt && cleanLink)\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "e1d90fcc-6414-4013-a07c-4bf8cb6a9343",
+      "name": "Normalize Fields"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "NrtpIe9A0MagIWgX",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NrtpIe9A0MagIWgX",
+          "cachedResultName": "01-ingestion-rss"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "bc3e8eb3-5576-478e-ac42-63112909effd",
+      "name": "Call '01-ingestion-rss'"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "8d4f0aa6-d280-469e-a8b0-b7c28b307fbd",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Call '01-ingestion-rss'": {
+      "main": [
+        [
+          {
+            "node": "Normalize Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Call '01-ingestion-rss'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "ebf743f1-458c-41ff-a259-44f1fac0a237",
+  "meta": {
+    "instanceId": "66b13931dc6cd134162c31d67165167cecc99cc826d0ff93ff50acc0146fc2d0"
+  },
+  "nodeGroups": [],
+  "id": "XF4DPd2LaMns4fQQ",
+  "tags": []
+}
