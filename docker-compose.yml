@@ -37,7 +37,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+  
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
 
 volumes:
   postgres_data:
   n8n_data:
+  ollama_data:
