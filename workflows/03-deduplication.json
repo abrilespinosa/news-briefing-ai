@@ -1,0 +1,260 @@
+{
+  "name": "03-deduplication",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        48
+      ],
+      "id": "36b38937-e9af-46b5-bf41-c7988d45af5a",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "XF4DPd2LaMns4fQQ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/XF4DPd2LaMns4fQQ",
+          "cachedResultName": "02-normalization"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        224,
+        48
+      ],
+      "id": "09915035-462e-4795-ab39-6a54f6b90c2d",
+      "name": "Call '02-normalization'"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        672,
+        144
+      ],
+      "id": "6402f71a-c6bc-44f5-a994-d61da9e3dd61",
+      "name": "Discarded - invalid normalization"
+    },
+    {
+      "parameters": {
+        "jsCode": "const links = items.map(item => item.json.link);\nreturn [{ json: { links } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -48
+      ],
+      "id": "1b009bfa-7567-484d-9e72-40b666f68cdf",
+      "name": "Collect Links"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT link\nFROM seen_articles\nWHERE link = ANY(\n  SELECT jsonb_array_elements_text($1::jsonb)\n);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.links) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        -48
+      ],
+      "id": "64606454-bec8-47c1-b31b-7fcfc99b2ced",
+      "name": "Check Seen Links",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const CATEGORY_PRIORITY = ['tecnologia', 'ciencia', 'economia', 'internacional', 'espana'];\n\nfunction priorityOf(category) {\n  const idx = CATEGORY_PRIORITY.indexOf(category);\n  return idx === -1 ? CATEGORY_PRIORITY.length : idx;\n}\n\nconst byLink = new Map();\n\nfor (const item of $('Validate Normalization').all()) {\n  const link = item.json.link;\n  const existing = byLink.get(link);\n\n  if (!existing || priorityOf(item.json.category) < priorityOf(existing.json.category)) {\n    byLink.set(link, item);\n  }\n}\n\nconst dedupedOriginalItems = Array.from(byLink.values());\n\nconst seenLinks = new Set(items.map(item => item.json.link));\nconst newItems = dedupedOriginalItems.filter(item => !seenLinks.has(item.json.link));\n\nreturn newItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -48
+      ],
+      "id": "52df772d-1178-4795-9e71-c857a9478d47",
+      "name": "Filter New Items",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO seen_articles (link, source_name, category, first_seen_at)\nVALUES ($1, $2, $3, now())\nON CONFLICT (link) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{$json.link}}, {{$json.source_name}}, {{$json.category}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1344,
+        -48
+      ],
+      "id": "22624630-210d-442e-9e2e-2e139eaf8e32",
+      "name": "Insert New Links",
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b0504460-b89e-406e-9c26-edaf204c8a7b",
+              "leftValue": "={{$json.normalization_valid}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        48
+      ],
+      "id": "2f58021f-9416-41f7-ad2b-e3eda08c63e7",
+      "name": "Validate Normalization"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Call '02-normalization'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call '02-normalization'": {
+      "main": [
+        [
+          {
+            "node": "Validate Normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discarded - invalid normalization": {
+      "main": [
+        []
+      ]
+    },
+    "Collect Links": {
+      "main": [
+        [
+          {
+            "node": "Check Seen Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Seen Links": {
+      "main": [
+        [
+          {
+            "node": "Filter New Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter New Items": {
+      "main": [
+        [
+          {
+            "node": "Insert New Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Normalization": {
+      "main": [
+        [
+          {
+            "node": "Collect Links",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discarded - invalid normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "cb446759-0f9f-4202-a3a0-84170b5573c4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "66b13931dc6cd134162c31d67165167cecc99cc826d0ff93ff50acc0146fc2d0"
+  },
+  "nodeGroups": [],
+  "id": "70t55B2OVJkHPxjr",
+  "tags": []
+}
