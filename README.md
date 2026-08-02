@@ -28,15 +28,15 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 | 00 | Trigger | ✅ Implementado | — |
 | 01 | Ingesta (RSS) | ✅ Implementado | [`docs/01-ingestion-rss.md`](docs/01-ingestion-rss.md) |
 | 02 | Normalización | ✅ Implementado | [`docs/02-normalization.md`](docs/02-normalization.md) |
-| 03 | Deduplicación | ⏳ Roadmap | — |
-| 04 | Clustering (mismo acontecimiento) | ⏳ Roadmap | — |
+| 03 | Deduplicación | ✅ Implementado | [`docs/03-deduplication.md`](docs/03-deduplication.md) |
+| 04 | Clustering (mismo acontecimiento) | ✅ Implementado | [`docs/04-clustering.md`](docs/04-clustering.md) |
 | 05 | Análisis LLM | ⏳ Roadmap | — |
 | 06 | Quality Filter | ⏳ Roadmap | — |
 | 07 | Categorización | ⏳ Roadmap | — |
 | 08 | Construcción del briefing | ⏳ Roadmap | — |
 | 09 | Entrega | ⏳ Roadmap | — |
 
-**Con el estado actual del repositorio, el sistema ingiere y normaliza noticias de 4 fuentes — todavía no genera un briefing.**
+**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica y agrupa noticias del mismo acontecimiento entre 4 fuentes — todavía no genera un briefing.**
 
 ---
 
@@ -54,10 +54,10 @@ Schedule Trigger
 02 · Normalización ── limpieza de HTML, fechas ISO 8601, URLs sin tracking
       │
       ▼
-03 · Deduplicación ⏳
+03 · Deduplicación ── tabla de trazabilidad en Postgres, evita reprocesar artículos vistos
       │
       ▼
-04 · Clustering ⏳ ── agrupa noticias del mismo acontecimiento entre fuentes
+04 · Clustering ── embeddings semánticos (Ollama + bge-m3) + similitud coseno, agrupa el mismo acontecimiento entre fuentes
       │
       ▼
 05 · Análisis LLM ⏳ ── compara fuentes, distingue hechos de interpretaciones
@@ -82,7 +82,8 @@ Schedule Trigger
 | Componente | Elección | Motivo |
 |---|---|---|
 | Orquestación | n8n (self-hosted) | Automatización visual, control total sobre el pipeline |
-| Base de datos | PostgreSQL | Persistencia robusta, necesaria para deduplicación entre ejecuciones |
+| Base de datos | PostgreSQL | Persistencia robusta: trazabilidad de deduplicación y artículos normalizados con embeddings |
+| Embeddings | Ollama + `bge-m3` (self-hosted) | Coste cero, multilingüe de fábrica, sin dependencia de una API externa de pago |
 | Infraestructura | Docker Compose | Entorno reproducible, sin dependencias manuales |
 | Fuentes de noticias | RSS | Gratuito, sin necesidad de scraping ni APIs de pago |
 | Secretos | `.env` / `.env.example` | Nunca se versionan credenciales |
@@ -108,15 +109,20 @@ docker compose up -d
 
 n8n queda disponible en `http://localhost:5678`.
 
+Tras el primer arranque, descarga el modelo de embeddings dentro del contenedor de Ollama (solo hace falta una vez, se persiste en un volumen):
+
+```bash
+docker exec -it news-briefing-ai-ollama-1 ollama pull bge-m3
+```
+
 ### Importar los workflows
 
 Los workflows implementados están exportados en [`workflows/`](workflows/):
 
-1. En n8n, `⋮` → `Import from File` → selecciona `workflows/01-ingestion-rss.json`
-2. Repite con `workflows/02-normalization.json`
-3. Publica ambos workflows (`Publish` en la esquina superior derecha del editor)
+1. En n8n, `⋮` → `Import from File` → importa, en este orden: `01-ingestion-rss.json`, `02-normalization.json`, `03-deduplication.json`, `04-clustering.json`
+2. Publica los cuatro workflows (`Publish` en la esquina superior derecha del editor)
 
-Actualmente `02-normalization` invoca a `01-ingestion-rss` internamente — no hace falta ejecutarlos por separado.
+Cada fase invoca a la anterior internamente (`Execute Workflow`) — no hace falta ejecutarlas por separado; basta con ejecutar `04-clustering` para disparar todo el pipeline hasta ese punto.
 
 ---
 
@@ -134,12 +140,18 @@ Detalle técnico de cada fuente (URLs de feed, estructura de campos) en [`docs/0
 news-briefing-ai/
 ├── docker-compose.yml
 ├── .env.example
+├── db/
+│   └── schema.sql
 ├── docs/
 │   ├── 01-ingestion-rss.md
-│   └── 02-normalization.md
+│   ├── 02-normalization.md
+│   ├── 03-deduplication.md
+│   └── 04-clustering.md
 └── workflows/
     ├── 01-ingestion-rss.json
-    └── 02-normalization.json
+    ├── 02-normalization.json
+    ├── 03-deduplication.json
+    └── 04-clustering.json
 ```
 
 ---
@@ -148,10 +160,12 @@ news-briefing-ai/
 
 Decisiones ya tomadas para fases futuras, pendientes de implementar:
 
-- **Deduplicación persistente** entre ejecuciones vía tabla en PostgreSQL (necesaria antes de soportar múltiples horarios de ejecución al día).
+- **Análisis LLM (fase 05)**: comparación de fuentes dentro de un mismo cluster, distinción entre hechos e interpretaciones, señalización de discrepancias factuales entre medios (ej. cifras distintas para el mismo evento).
+- **Identidad persistente de eventos**: hoy el clustering compara artículos dentro de una ventana de 24h; un evento en desarrollo durante varios días (ej. cobertura de un incendio) no se vincula todavía con artículos de días anteriores.
 - **Quality Filter en cascada**: filtro estructural por número de fuentes que cubren el mismo acontecimiento, seguido de un filtro LLM que rescata piezas de fuente única con valor periodístico (p. ej. exclusivas de investigación).
 - **Cola de revisión humana asíncrona**, no bloqueante — nunca debe frenar la ejecución automática diaria.
 - **Extracción de contenido completo** del artículo (más allá del resumen del RSS) para dar más contexto al análisis LLM.
+- **Migración a `pgvector`** si el volumen de artículos crece lo suficiente para justificar indexación nativa de vectores en Postgres.
 
 ---
 
