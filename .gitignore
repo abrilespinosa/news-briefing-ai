@@ -1,0 +1,4 @@
+.env
+postgres_data/
+n8n_data/
+.DS_Store
