@@ -57,7 +57,7 @@ Schedule Trigger
 03 · Deduplicación ── tabla de trazabilidad en Postgres, evita reprocesar artículos vistos
       │
       ▼
-04 · Clustering ── embeddings semánticos (Ollama + bge-m3) + similitud coseno, agrupa el mismo acontecimiento entre fuentes
+04 · Clustering ── embeddings semánticos (Ollama + bge-m3), similitud coseno en Postgres (pgvector) + Union-Find, agrupa el mismo acontecimiento entre fuentes
       │
       ▼
 05 · Análisis LLM ⏳ ── compara fuentes, distingue hechos de interpretaciones
@@ -82,7 +82,7 @@ Schedule Trigger
 | Componente | Elección | Motivo |
 |---|---|---|
 | Orquestación | n8n (self-hosted) | Automatización visual, control total sobre el pipeline |
-| Base de datos | PostgreSQL | Persistencia robusta: trazabilidad de deduplicación y artículos normalizados con embeddings |
+| Base de datos | PostgreSQL + `pgvector` | Persistencia robusta: trazabilidad de deduplicación, artículos normalizados con embeddings nativos (`vector(1024)`) y similitud coseno calculada en SQL |
 | Embeddings | Ollama + `bge-m3` (self-hosted) | Coste cero, multilingüe de fábrica, sin dependencia de una API externa de pago |
 | Infraestructura | Docker Compose | Entorno reproducible, sin dependencias manuales |
 | Fuentes de noticias | RSS | Gratuito, sin necesidad de scraping ni APIs de pago |
@@ -165,7 +165,7 @@ Decisiones ya tomadas para fases futuras, pendientes de implementar:
 - **Quality Filter en cascada**: filtro estructural por número de fuentes que cubren el mismo acontecimiento, seguido de un filtro LLM que rescata piezas de fuente única con valor periodístico (p. ej. exclusivas de investigación).
 - **Cola de revisión humana asíncrona**, no bloqueante — nunca debe frenar la ejecución automática diaria.
 - **Extracción de contenido completo** del artículo (más allá del resumen del RSS) para dar más contexto al análisis LLM.
-- **Migración a `pgvector`** si el volumen de artículos crece lo suficiente para justificar indexación nativa de vectores en Postgres.
+- **Índice ANN (`ivfflat`/`hnsw`) sobre `pgvector`** si el volumen de artículos crece lo suficiente para que el self-join de similitud deje de ser trivial (ya migrado a `pgvector`; ver [`docs/04-clustering.md`](docs/04-clustering.md)).
 
 ---
 

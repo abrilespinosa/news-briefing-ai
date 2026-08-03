@@ -135,7 +135,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, link, title, content, category, source_name, published_date, language, embedding\nFROM normalized_articles\nWHERE processed_at >= NOW() - INTERVAL '24 hours';",
+        "query": "SELECT id, link, title, category, source_name\nFROM normalized_articles\nWHERE processed_at >= NOW() - INTERVAL '24 hours';",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -178,16 +178,38 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst articles = items.map(item => item.json);\n\n// Postgres devuelve embedding como JSONB -> puede llegar como string o como array ya parseado\nconst getEmbedding = (article) => {\n  return typeof article.embedding === 'string'\n    ? JSON.parse(article.embedding)\n    : article.embedding;\n};\n\nfunction cosineSimilarity(vecA, vecB) {\n  let dotProduct = 0;\n  let normA = 0;\n  let normB = 0;\n  for (let i = 0; i < vecA.length; i++) {\n    dotProduct += vecA[i] * vecB[i];\n    normA += vecA[i] * vecA[i];\n    normB += vecB[i] * vecB[i];\n  }\n  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));\n}\n\nconst SIMILARITY_THRESHOLD = 0.83;\nconst n = articles.length;\nconst embeddings = articles.map(getEmbedding);\n\n// Union-Find (Disjoint Set Union)\nconst parent = Array.from({ length: n }, (_, i) => i);\n\nfunction find(i) {\n  if (parent[i] !== i) {\n    parent[i] = find(parent[i]);\n  }\n  return parent[i];\n}\n\nfunction union(i, j) {\n  const rootI = find(i);\n  const rootJ = find(j);\n  if (rootI !== rootJ) {\n    parent[rootJ] = rootI;\n  }\n}\n\n// Comparar todos los pares (i, j) una sola vez\nfor (let i = 0; i < n; i++) {\n  for (let j = i + 1; j < n; j++) {\n    const similarity = cosineSimilarity(embeddings[i], embeddings[j]);\n    if (similarity >= SIMILARITY_THRESHOLD) {\n      union(i, j);\n    }\n  }\n}\n\n// Agrupar artículos por su raíz de cluster\nconst clustersMap = {};\nfor (let i = 0; i < n; i++) {\n  const root = find(i);\n  if (!clustersMap[root]) {\n    clustersMap[root] = [];\n  }\n  clustersMap[root].push(articles[i]);\n}\n\n// Convertir a array de clusters, con metadatos útiles\nconst clusters = Object.values(clustersMap).map((articleGroup, index) => ({\n  cluster_id: index,\n  article_count: articleGroup.length,\n  source_count: new Set(articleGroup.map(a => a.source_name)).size,\n  sources: [...new Set(articleGroup.map(a => a.source_name))],\n  articles: articleGroup.map(a => ({\n    title: a.title,\n    link: a.link,\n    source_name: a.source_name,\n    category: a.category\n  }))\n}));\n\nreturn clusters.map(cluster => ({ json: cluster }));"
+        "jsCode": "const articles = $('Get Articles for Clustering Window').all().map(item => item.json);\nconst edges = $input.all().map(item => item.json);\n\nconst idToIndex = new Map();\narticles.forEach((a, i) => idToIndex.set(a.id, i));\n\nconst n = articles.length;\nconst parent = Array.from({ length: n }, (_, i) => i);\n\nfunction find(i) {\n  if (parent[i] !== i) {\n    parent[i] = find(parent[i]);\n  }\n  return parent[i];\n}\n\nfunction union(i, j) {\n  const rootI = find(i);\n  const rootJ = find(j);\n  if (rootI !== rootJ) {\n    parent[rootJ] = rootI;\n  }\n}\n\n// Las aristas ya vienen filtradas por umbral (0.83) calculadas en Postgres con pgvector\nfor (const edge of edges) {\n  const i = idToIndex.get(edge.id_a);\n  const j = idToIndex.get(edge.id_b);\n  if (i !== undefined && j !== undefined) {\n    union(i, j);\n  }\n}\n\n// Agrupar artículos por su raíz de cluster\nconst clustersMap = {};\nfor (let i = 0; i < n; i++) {\n  const root = find(i);\n  if (!clustersMap[root]) {\n    clustersMap[root] = [];\n  }\n  clustersMap[root].push(articles[i]);\n}\n\n// Convertir a array de clusters, con metadatos útiles\nconst clusters = Object.values(clustersMap).map((articleGroup, index) => ({\n  cluster_id: index,\n  article_count: articleGroup.length,\n  source_count: new Set(articleGroup.map(a => a.source_name)).size,\n  sources: [...new Set(articleGroup.map(a => a.source_name))],\n  articles: articleGroup.map(a => ({\n    title: a.title,\n    link: a.link,\n    source_name: a.source_name,\n    category: a.category\n  }))\n}));\n\nreturn clusters.map(cluster => ({ json: cluster }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1792,
+        2016,
         48
       ],
       "id": "219b0b4f-2f7f-40c6-a6f7-4bc2ea30c581",
       "name": "Cluster Articles by Similarity"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH window_articles AS (\n  SELECT id, embedding\n  FROM normalized_articles\n  WHERE processed_at >= NOW() - INTERVAL '24 hours'\n)\nSELECT a.id AS id_a, b.id AS id_b\nFROM window_articles a\nJOIN window_articles b ON a.id < b.id\nWHERE 1 - (a.embedding <=> b.embedding) >= 0.83;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1792,
+        48
+      ],
+      "id": "5699d7c2-1f8b-45c6-8e59-cb086af72245",
+      "name": "Compute Similarity Edges",
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      },
+      "executeOnce": true
     }
   ],
   "pinData": {},
@@ -280,7 +302,7 @@
       "main": [
         [
           {
-            "node": "Cluster Articles by Similarity",
+            "node": "Compute Similarity Edges",
             "type": "main",
             "index": 0
           }
@@ -302,6 +324,17 @@
           }
         ]
       ]
+    },
+    "Compute Similarity Edges": {
+      "main": [
+        [
+          {
+            "node": "Cluster Articles by Similarity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -310,10 +343,9 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "367f32ca-fa19-4959-91d2-10fdf8914aa2",
+  "versionId": "acad47dd-29a0-43d9-bc33-cc4578f35a9c",
   "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "66b13931dc6cd134162c31d67165167cecc99cc826d0ff93ff50acc0146fc2d0"
+    "templateCredsSetupCompleted": true
   },
   "nodeGroups": [],
   "id": "bYXJuMvakml3lLLz",
