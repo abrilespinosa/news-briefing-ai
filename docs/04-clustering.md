@@ -4,7 +4,7 @@
 
 Agrupar artículos de distintas fuentes que hablan del mismo acontecimiento, para tratarlos como un único evento con múltiples fuentes citadas, en lugar de mostrar noticias casi idénticas por separado.
 
-Convierte una lista plana de artículos normalizados y deduplicados en una lista de **eventos**, cada uno con sus artículos asociados. Es el input que consumirá la fase 06 (LLM Analysis) para comparar fuentes y detectar discrepancias.
+Convierte una lista plana de artículos normalizados y deduplicados en una lista de **eventos**, cada uno con sus artículos asociados. Es el input que consumirá la fase 05 (Análisis LLM) para comparar fuentes y detectar discrepancias.
 
 ## Arquitectura
 
@@ -92,9 +92,11 @@ Umbral de similitud coseno: **0.83**, calibrado empíricamente sobre datos reale
   "article_count": 2,
   "source_count": 2,
   "sources": ["El País", "elDiario.es"],
-  "articles": [ { "title": "...", "link": "...", "source_name": "...", "category": "..." } ]
+  "articles": [ { "title": "...", "link": "...", "source_name": "...", "category": "...", "content": "..." } ]
 }
 ```
+
+`content` se añadió al pasar a diseñar la fase 05: sin el texto del artículo, un análisis LLM no tiene con qué comparar fuentes.
 
 `source_count` se calcula en esta fase, ya que es la única con acceso directo a los artículos agrupados; lo reutilizará la fase 07 (Quality Filter) como filtro estructural por número de fuentes.
 

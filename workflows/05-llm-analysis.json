@@ -1,0 +1,520 @@
+{
+  "name": "05-llm-analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        64
+      ],
+      "id": "n05-trigger",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bYXJuMvakml3lLLz",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bYXJuMvakml3lLLz",
+          "cachedResultName": "04-clustering"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        224,
+        64
+      ],
+      "id": "n05-call04",
+      "name": "Call '04-clustering'"
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_CONTENT_CHARS = 2000;\n\nfunction buildArticlesBlock(articles) {\n  return articles.map(a => {\n    const content = (a.content || '').slice(0, MAX_CONTENT_CHARS);\n    return `[Fuente: ${a.source_name}]\\nTítulo: ${a.title}\\nTexto: ${content}`;\n  }).join('\\n\\n');\n}\n\nconst SCHEMA = `{\n  \"que_paso\": string,\n  \"por_que_importa\": string,\n  \"impacto\": string,\n  \"hechos_confirmados\": string[],\n  \"interpretaciones\": [{\"fuente\": string, \"afirmacion\": string}],\n  \"discrepancias\": [{\"aspecto\": string, \"version_por_fuente\": {\"<nombre_fuente>\": string}}],\n  \"preguntas_abiertas\": string[]\n}`;\n\n// Solo llegan aquí clusters con source_count >= 2 (filtrados antes de este nodo)\nconst RULES = `Eres un analista de noticias. Compara cómo distintos medios han cubierto el MISMO acontecimiento, usando ÚNICAMENTE los textos de abajo.\n\nEs muy probable que ya conozcas este suceso (o uno similar) de tu entrenamiento, con datos adicionales que no están en los textos de abajo (cifras de superficie afectada, evacuados, fallecidos, fechas). IGNORA por completo ese conocimiento previo. Compórtate como si esta fuera la única información que existe sobre el hecho.\n\nEjemplo de lo que NO debes hacer: si ningún texto menciona cuántas hectáreas ha quemado un incendio, NO escribas ninguna cifra de hectáreas, aunque la recuerdes de casos similares. Si un dato no aparece literalmente en alguno de los textos de abajo, omítelo — no lo apliques por analogía ni lo redondees.\n\nReglas:\n- Sé conciso: cada campo de texto son 1-3 frases directas, sin rodeos ni repeticiones. Pero no sacrifiques información necesaria para entender el hecho por acortar demasiado — prioriza que quien lo lea entienda qué pasó y por qué importa, no la brevedad extrema.\n- Nada de introducciones ni opiniones propias.\n- Diferencia hechos verificables de interpretaciones (juicios de valor, adjetivos calificativos). Una diferencia de precisión entre fuentes sobre el mismo hecho (ej. \"misiles\" vs \"misiles y drones\") es una discrepancia factual, no una interpretación.\n- Si dos fuentes dan datos distintos del mismo hecho, señálalo en \"discrepancias\" con la versión de cada fuente.\n- \"hechos_confirmados\" son solo los hechos en los que TODAS las fuentes coinciden.\n- Incluye tantos elementos como sean relevantes y estén respaldados por el texto en los arrays (\"hechos_confirmados\", \"interpretaciones\", \"discrepancias\", \"preguntas_abiertas\") — ni un número arbitrario ni relleno sin sustancia.\n- Todos los campos del esquema deben rellenarse con contenido real; ninguno puede quedar vacío.\n- JSON válido, sin comas finales.\n- Responde SOLO con el JSON final.`;\n\nconst items = $input.all();\n\nreturn items.map(item => {\n  const cluster = item.json;\n  const articlesBlock = buildArticlesBlock(cluster.articles);\n\n  const prompt = `${RULES}\n\nEsquema exacto de salida (JSON):\n${SCHEMA}\n\nArtículos:\n${articlesBlock}`;\n\n  return {\n    json: {\n      cluster_id: cluster.cluster_id,\n      article_count: cluster.article_count,\n      source_count: cluster.source_count,\n      sources: cluster.sources,\n      articles: cluster.articles.map(a => ({ title: a.title, link: a.link, source_name: a.source_name, category: a.category })),\n      prompt\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        0
+      ],
+      "id": "n05-buildprompt",
+      "name": "Build Prompt per Cluster"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($json.prompt) }} }],\n  \"temperature\": 0.1,\n  \"response_format\": {\"type\": \"json_object\"}\n}",
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2240,
+        0
+      ],
+      "id": "n05-callgroq",
+      "name": "Call Groq for Analysis",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "FzTkQDMGTIRwjVfc",
+          "name": "Groq API"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const REQUIRED_FIELDS = [\n  'que_paso', 'por_que_importa', 'impacto',\n  'hechos_confirmados', 'interpretaciones', 'discrepancias', 'preguntas_abiertas'\n];\n\nfunction stripTrailingCommas(text) {\n  // deepseek-r1 y otros modelos suelen dejar comas finales antes de \"}\" o \"]\", inválidas en JSON estricto\n  return text.replace(/,(\\s*[}\\]])/g, '$1');\n}\n\nfunction extractJson(raw) {\n  // Por si en el futuro se usa un modelo de razonamiento que antepone <think>...</think>\n  const withoutThink = raw.replace(/<think>[\\s\\S]*?<\\/think>/i, '').trim();\n  const cleaned = stripTrailingCommas(withoutThink);\n\n  try {\n    return JSON.parse(cleaned);\n  } catch (e) {\n    const start = cleaned.indexOf('{');\n    const end = cleaned.lastIndexOf('}');\n    if (start === -1 || end === -1 || end <= start) {\n      throw new Error(`No se encontró un JSON válido en la respuesta del LLM. Respuesta cruda (primeros 500 caracteres): ${raw.slice(0, 500)}`);\n    }\n    const candidate = cleaned.slice(start, end + 1);\n    try {\n      return JSON.parse(candidate);\n    } catch (e2) {\n      throw new Error(`JSON extraído no parseable: ${e2.message}. Candidato (primeros 500 caracteres): ${candidate.slice(0, 500)}`);\n    }\n  }\n}\n\nconst items = $input.all();\n\n// Cada item se procesa de forma aislada: si uno falla al parsear, se guarda\n// como registro de error y el resto del batch sigue su curso — un cluster\n// problemático no debe tirar el análisis de los demás.\nreturn items.map((item, idx) => {\n  // itemMatching resuelve el item de origen real vía pairedItem, no por posición\n  // dentro de esta rama — n8n reindexa desde 0 cada rama de salida (éxito/error),\n  // así que una simple posición local aquí apuntaría al cluster equivocado.\n  const clusterMeta = $('Build Prompt per Cluster').itemMatching(idx).json;\n  const base = {\n    cluster_id: clusterMeta.cluster_id,\n    source_count: clusterMeta.source_count,\n    sources: clusterMeta.sources,\n    articles: clusterMeta.articles\n  };\n\n  try {\n    const raw = item.json.choices?.[0]?.message?.content;\n    if (!raw) {\n      throw new Error(`Respuesta de Groq sin contenido esperado (choices[0].message.content). Payload recibido: ${JSON.stringify(item.json).slice(0, 500)}`);\n    }\n    const parsed = extractJson(raw);\n\n    const missing = REQUIRED_FIELDS.filter(f => !(f in parsed));\n    if (missing.length > 0) {\n      throw new Error(`Faltan campos requeridos en la respuesta del LLM: ${missing.join(', ')}. JSON recibido: ${JSON.stringify(parsed).slice(0, 500)}`);\n    }\n\n    return { json: { ...base, analysis: parsed, status: 'ok', error_message: null } };\n  } catch (e) {\n    return { json: { ...base, analysis: null, status: 'error', error_message: e.message } };\n  }\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        0
+      ],
+      "id": "n05-parse",
+      "name": "Parse & Validate LLM Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f1source-count",
+              "leftValue": "={{ $json.source_count }}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        64
+      ],
+      "id": "n05-filtersources",
+      "name": "Filter Multi-Source Clusters"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        672,
+        160
+      ],
+      "id": "n05-skipsingle",
+      "name": "Single Source - Skipped for Now"
+    },
+    {
+      "parameters": {
+        "maxItems": 2
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        -120
+      ],
+      "id": "n05-devlimit",
+      "name": "⚠️ DEV ONLY - Limit to 2 Clusters",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rama de error de \"Call Ollama for Analysis\" (onError: continueErrorOutput).\n// Un fallo de red/timeout aquí no debe tirar el resto del batch — se registra\n// como intento fallido en cluster_analysis y el workflow sigue.\nconst items = $input.all();\n\nreturn items.map((item, idx) => {\n  // itemMatching resuelve el item de origen real vía pairedItem, no por posición\n  // dentro de esta rama — ver mismo comentario en Parse & Validate LLM Response.\n  const clusterMeta = $('Build Prompt per Cluster').itemMatching(idx).json;\n  const errorMessage =\n    item.json?.error?.message ||\n    item.json?.error ||\n    item.json?.message ||\n    `Fallo en la llamada a Ollama sin mensaje de error legible: ${JSON.stringify(item.json).slice(0, 300)}`;\n\n  return {\n    json: {\n      cluster_id: clusterMeta.cluster_id,\n      source_count: clusterMeta.source_count,\n      sources: clusterMeta.sources,\n      articles: clusterMeta.articles,\n      analysis: null,\n      status: 'error',\n      error_message: String(errorMessage).slice(0, 1000)\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        64
+      ],
+      "id": "n05-handlefailure",
+      "name": "Handle Groq Call Failure"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO cluster_analysis (cluster_id, source_count, sources, articles, analysis, status, error_message)\nVALUES ($1, $2, $3, $4, $5, $6, $7);",
+        "options": {
+          "queryReplacement": "=={{ [$json.cluster_id, $json.source_count, JSON.stringify($json.sources), JSON.stringify($json.articles), $json.analysis ? JSON.stringify($json.analysis) : null, $json.status, $json.error_message] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2240,
+        -32
+      ],
+      "id": "n05-insertanalysis",
+      "name": "Insert Cluster Analysis",
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT DISTINCT (article->>'link') AS link\nFROM cluster_analysis, jsonb_array_elements(articles) AS article\nWHERE status = 'ok' AND analyzed_at >= NOW() - INTERVAL '48 hours';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        -32
+      ],
+      "id": "n05-getlinks",
+      "name": "Get Already-Analyzed Links",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// \"Get Already-Analyzed Links\" corre una sola vez (executeOnce) y devuelve\n// un row por link ya cubierto con éxito en las últimas 48h. Aquí se recupera\n// la lista real de clusters desde el nodo del filtro de fuentes (no desde\n// el input directo, ya que executeOnce reemplaza los items por los suyos).\nconst analyzedLinks = new Set($input.all().map(item => item.json.link));\nconst clusters = $('Filter Multi-Source Clusters').all().map(item => item.json);\n\n// Se reprocesa un cluster si tiene AL MENOS un artículo todavía no analizado\n// con éxito (ej. una fuente nueva se sumó a un evento ya cubierto). Si TODOS\n// sus artículos ya están cubiertos, se salta — ya se generó un análisis para\n// exactamente ese conjunto de fuentes.\nconst unanalyzed = clusters.filter(cluster => {\n  const links = cluster.articles.map(a => a.link);\n  const allAlreadyAnalyzed = links.every(link => analyzedLinks.has(link));\n  return !allAlreadyAnalyzed;\n});\n\nreturn unanalyzed.map(c => ({ json: c }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -32
+      ],
+      "id": "n05-filterunanalyzed",
+      "name": "Filter Unanalyzed Clusters"
+    },
+    {
+      "parameters": {
+        "maxItems": 5
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        0
+      ],
+      "id": "n05-batchlimit",
+      "name": "Limit Batch Size (5/run)"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) AS calls_today FROM cluster_analysis WHERE analyzed_at >= NOW() - INTERVAL '24 hours';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        96
+      ],
+      "id": "n05-checkcap",
+      "name": "Count Groq Calls Today",
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "capcheck1",
+              "leftValue": "={{ Number($json.calls_today) }}",
+              "rightValue": 25,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        96
+      ],
+      "id": "n05-capif",
+      "name": "Under Daily Cap? (<25)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// \"Check Daily Cap\" corre una sola vez (executeOnce) y su output es la fila\n// del count, no la lista de clusters. Aquí se recupera la lista real desde\n// el nodo anterior para que el resto de la cadena siga trabajando con los\n// clusters, no con la fila de conteo.\nreturn $('Filter Unanalyzed Clusters').all();\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "n05-restoreclusters",
+      "name": "Restore Cluster List"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        200
+      ],
+      "id": "n05-capreached",
+      "name": "⛔ Daily Cap Reached (25) - Skipping Groq"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Call '04-clustering'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call '04-clustering'": {
+      "main": [
+        [
+          {
+            "node": "Filter Multi-Source Clusters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt per Cluster": {
+      "main": [
+        [
+          {
+            "node": "⚠️ DEV ONLY - Limit to 2 Clusters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Multi-Source Clusters": {
+      "main": [
+        [
+          {
+            "node": "Get Already-Analyzed Links",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Single Source - Skipped for Now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚠️ DEV ONLY - Limit to 2 Clusters": {
+      "main": [
+        [
+          {
+            "node": "Call Groq for Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Insert Cluster Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Already-Analyzed Links": {
+      "main": [
+        [
+          {
+            "node": "Filter Unanalyzed Clusters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Unanalyzed Clusters": {
+      "main": [
+        [
+          {
+            "node": "Count Groq Calls Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit Batch Size (5/run)": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt per Cluster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Groq for Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Groq Call Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Groq Call Failure": {
+      "main": [
+        [
+          {
+            "node": "Insert Cluster Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Groq Calls Today": {
+      "main": [
+        [
+          {
+            "node": "Under Daily Cap? (<25)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Cluster List": {
+      "main": [
+        [
+          {
+            "node": "Limit Batch Size (5/run)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Under Daily Cap? (<25)": {
+      "main": [
+        [
+          {
+            "node": "Restore Cluster List",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⛔ Daily Cap Reached (25) - Skipping Groq",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9a931c58-c7bf-43fd-894b-7a5f06b2fb04",
+  "meta": null,
+  "nodeGroups": [],
+  "id": "EpfAWRMrKttE97F1",
+  "tags": []
+}
