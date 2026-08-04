@@ -36,7 +36,7 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 | 08 | Construcción del briefing | ⏳ Roadmap | — |
 | 09 | Entrega | ⏳ Roadmap | — |
 
-**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica, agrupa y analiza (comparando fuentes, señalando discrepancias) noticias del mismo acontecimiento entre 4 fuentes — todavía no genera un briefing.**
+**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica, agrupa y analiza (comparando fuentes, señalando discrepancias) noticias del mismo acontecimiento entre 7 fuentes — todavía no genera un briefing.**
 
 ---
 
@@ -48,7 +48,7 @@ Cada fase es un sub-workflow de n8n independiente, invocado mediante `Execute Wo
 Schedule Trigger
       │
       ▼
-01 · Ingesta ──── RSS multi-fuente (El País, elDiario.es, El Mundo, ABC)
+01 · Ingesta ──── RSS multi-fuente (El País, elDiario.es, El Mundo, ABC, 20minutos, La Vanguardia, Europa Press)
       │
       ▼
 02 · Normalización ── limpieza de HTML, fechas ISO 8601, URLs sin tracking
@@ -133,7 +133,7 @@ Cada fase invoca a la anterior internamente (`Execute Workflow`) — no hace fal
 
 ## Fuentes de noticias
 
-El sistema ingiere RSS de 4 medios españoles: El País, elDiario.es, El Mundo y ABC. La selección busca diversidad de fuentes como mecanismo para reducir la dependencia de un único punto de vista — el sistema no clasifica ni etiqueta a los medios por línea editorial.
+El sistema ingiere RSS de 7 medios españoles: El País, elDiario.es, El Mundo, ABC, 20minutos, La Vanguardia y Europa Press. La selección busca diversidad de fuentes como mecanismo para reducir la dependencia de un único punto de vista — el sistema no clasifica ni etiqueta a los medios por línea editorial.
 
 Detalle técnico de cada fuente (URLs de feed, estructura de campos) en [`docs/01-ingestion-rss.md`](docs/01-ingestion-rss.md).
 

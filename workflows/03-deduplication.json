@@ -160,6 +160,32 @@
       ],
       "id": "2f58021f-9416-41f7-ad2b-e3eda08c63e7",
       "name": "Validate Normalization"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Filter New Items').all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        -48
+      ],
+      "id": "f78164e1-4ac4-4e57-836c-d51fd275b984",
+      "name": "Output Deduplicated Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 'Insert New Links' solo confirma la escritura ({success:true}), no devuelve\n// las filas insertadas (sin RETURNING). Sin este paso, quien llame a este\n// workflow (04-clustering) recibiría esa confirmación en vez de los artículos\n// nuevos reales, y pensaría que no hay nada que embeber.\nreturn $('Filter New Items').all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -48
+      ],
+      "id": "n03-returnnew",
+      "name": "Return New Articles"
     }
   ],
   "pinData": {},
@@ -241,18 +267,26 @@
           }
         ]
       ]
+    },
+    "Insert New Links": {
+      "main": [
+        [
+          {
+            "node": "Return New Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
   "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate",
-    "availableInMCP": false
+    "executionOrder": "v1"
   },
-  "versionId": "cb446759-0f9f-4202-a3a0-84170b5573c4",
+  "versionId": "05321f83-1762-40f6-a9ab-999b002986be",
   "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "66b13931dc6cd134162c31d67165167cecc99cc826d0ff93ff50acc0146fc2d0"
+    "templateCredsSetupCompleted": true
   },
   "nodeGroups": [],
   "id": "70t55B2OVJkHPxjr",

@@ -32,6 +32,11 @@ Manual Trigger
 | elDiario.es | portada (1 feed) | `content` (no `content:encoded`) trae HTML completo, incluye multimedia embebida |
 | El Mundo | portada (1 feed) | Feed de portada verificado con contenido completo |
 | ABC | portada (1 feed, RSS 2.0) | Se descartó la variante Atom por sección (`/rss/atom/...`) porque solo traía resúmenes de 1-2 líneas, insuficientes para análisis LLM fiable. El feed de portada RSS 2.0 (`/rss/2.0/portada/`) sí trae contenido completo y categoriza cada item individualmente |
+| 20minutos | portada (1 feed) | `description` |
+| La Vanguardia | portada (1 feed) | `description` |
+| Europa Press | portada (1 feed) | `description` |
+
+**RTVE evaluado y descartado:** sus feeds RSS (`rtve.es/rss/*.xml`) responden con HTTP 200 pero devuelven contenido sin actualizar desde mediados de 2022 — el servicio parece abandonado aunque las URLs sigan activas. Verificado con dos feeds distintos (`temas_noticias.xml`, `temas_espana.xml`) antes de descartarlo, no es un fallo puntual de uno solo.
 
 **Por qué varias fuentes y no solo una ampliada:** el objetivo del proyecto es minimizar el sesgo de depender de un único medio para decidir qué es relevante y cómo se enmarca. Consultar varios medios independientes entre sí, en vez de ampliar la cobertura de uno solo, es la base sobre la que se apoyará el futuro filtro de "corroboración por múltiples fuentes" (ver Limitaciones conocidas). Este proyecto no asigna ni documenta posicionamientos editoriales a los medios consultados; la selección de fuentes prioriza cobertura nacional generalista y variedad de redacciones independientes entre sí.
 
@@ -47,7 +52,10 @@ Manual Trigger
     { "source_name": "El País", "category": "espana", "rss_url": "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/espana/portada" },
     { "source_name": "elDiario.es", "category": "portada", "rss_url": "https://www.eldiario.es/rss" },
     { "source_name": "El Mundo", "category": "portada", "rss_url": "https://e00-elmundo.uecdn.es/rss/portada.xml" },
-    { "source_name": "ABC", "category": "portada", "rss_url": "https://www.abc.es/rss/2.0/portada/" }
+    { "source_name": "ABC", "category": "portada", "rss_url": "https://www.abc.es/rss/2.0/portada/" },
+    { "source_name": "20minutos", "category": "portada", "rss_url": "https://www.20minutos.es/rss" },
+    { "source_name": "La Vanguardia", "category": "portada", "rss_url": "https://www.lavanguardia.com/rss/home.xml" },
+    { "source_name": "Europa Press", "category": "portada", "rss_url": "https://www.europapress.es/rss/rss.aspx" }
   ]
 }
 ```
@@ -66,6 +74,9 @@ El mayor reto de esta fase fue que cada medio nombra sus campos RSS de forma dis
 | elDiario.es | `content` |
 | El Mundo | (pendiente de confirmar campo exacto tras el último cambio) |
 | ABC (portada RSS 2.0) | a confirmar — verificar tras el cambio desde Atom |
+| 20minutos | `description` |
+| La Vanguardia | `description` |
+| Europa Press | `description` |
 
 > Nota: al pasar ABC de feeds Atom a feed de portada RSS 2.0, conviene reconfirmar el nombre exacto del campo de contenido — puede diferir del que tenían los feeds Atom descartados.
 
