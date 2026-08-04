@@ -135,7 +135,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, link, title, category, source_name\nFROM normalized_articles\nWHERE processed_at >= NOW() - INTERVAL '24 hours';",
+        "query": "SELECT id, link, title, content, category, source_name\nFROM normalized_articles\nWHERE processed_at >= NOW() - INTERVAL '24 hours';",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -178,7 +178,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const articles = $('Get Articles for Clustering Window').all().map(item => item.json);\nconst edges = $input.all().map(item => item.json);\n\nconst idToIndex = new Map();\narticles.forEach((a, i) => idToIndex.set(a.id, i));\n\nconst n = articles.length;\nconst parent = Array.from({ length: n }, (_, i) => i);\n\nfunction find(i) {\n  if (parent[i] !== i) {\n    parent[i] = find(parent[i]);\n  }\n  return parent[i];\n}\n\nfunction union(i, j) {\n  const rootI = find(i);\n  const rootJ = find(j);\n  if (rootI !== rootJ) {\n    parent[rootJ] = rootI;\n  }\n}\n\n// Las aristas ya vienen filtradas por umbral (0.83) calculadas en Postgres con pgvector\nfor (const edge of edges) {\n  const i = idToIndex.get(edge.id_a);\n  const j = idToIndex.get(edge.id_b);\n  if (i !== undefined && j !== undefined) {\n    union(i, j);\n  }\n}\n\n// Agrupar artículos por su raíz de cluster\nconst clustersMap = {};\nfor (let i = 0; i < n; i++) {\n  const root = find(i);\n  if (!clustersMap[root]) {\n    clustersMap[root] = [];\n  }\n  clustersMap[root].push(articles[i]);\n}\n\n// Convertir a array de clusters, con metadatos útiles\nconst clusters = Object.values(clustersMap).map((articleGroup, index) => ({\n  cluster_id: index,\n  article_count: articleGroup.length,\n  source_count: new Set(articleGroup.map(a => a.source_name)).size,\n  sources: [...new Set(articleGroup.map(a => a.source_name))],\n  articles: articleGroup.map(a => ({\n    title: a.title,\n    link: a.link,\n    source_name: a.source_name,\n    category: a.category\n  }))\n}));\n\nreturn clusters.map(cluster => ({ json: cluster }));"
+        "jsCode": "const articles = $('Get Articles for Clustering Window').all().map(item => item.json);\nconst edges = $input.all().map(item => item.json);\n\nconst idToIndex = new Map();\narticles.forEach((a, i) => idToIndex.set(a.id, i));\n\nconst n = articles.length;\nconst parent = Array.from({ length: n }, (_, i) => i);\n\nfunction find(i) {\n  if (parent[i] !== i) {\n    parent[i] = find(parent[i]);\n  }\n  return parent[i];\n}\n\nfunction union(i, j) {\n  const rootI = find(i);\n  const rootJ = find(j);\n  if (rootI !== rootJ) {\n    parent[rootJ] = rootI;\n  }\n}\n\n// Las aristas ya vienen filtradas por umbral (0.83) calculadas en Postgres con pgvector\nfor (const edge of edges) {\n  const i = idToIndex.get(edge.id_a);\n  const j = idToIndex.get(edge.id_b);\n  if (i !== undefined && j !== undefined) {\n    union(i, j);\n  }\n}\n\n// Agrupar artículos por su raíz de cluster\nconst clustersMap = {};\nfor (let i = 0; i < n; i++) {\n  const root = find(i);\n  if (!clustersMap[root]) {\n    clustersMap[root] = [];\n  }\n  clustersMap[root].push(articles[i]);\n}\n\n// Convertir a array de clusters, con metadatos útiles\nconst clusters = Object.values(clustersMap).map((articleGroup, index) => ({\n  cluster_id: index,\n  article_count: articleGroup.length,\n  source_count: new Set(articleGroup.map(a => a.source_name)).size,\n  sources: [...new Set(articleGroup.map(a => a.source_name))],\n  articles: articleGroup.map(a => ({\n    title: a.title,\n    link: a.link,\n    source_name: a.source_name,\n    category: a.category,\n    content: a.content\n  }))\n}));\n\nreturn clusters.map(cluster => ({ json: cluster }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -343,7 +343,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "acad47dd-29a0-43d9-bc33-cc4578f35a9c",
+  "versionId": "559df680-6c77-47a6-a5bd-ae4bc1bd4881",
   "meta": {
     "templateCredsSetupCompleted": true
   },
