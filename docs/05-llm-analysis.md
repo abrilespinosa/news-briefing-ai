@@ -74,6 +74,12 @@ Estos mecanismos se diseñaron mientras el motor era Ollama local, donde una eje
 
 Esto convierte 05 en un procesador de cola: da igual si hoy hay 8 clusters o 80, cada ejecución avanza un bloque acotado y nunca hay una carrera contra el tiempo dentro de una sola corrida. La fase 00 (Trigger/Schedule), todavía sin diseñar, será la que decida cada cuánto se dispara — con esto ya construido, dispararlo cada 10-15 minutos drenaría la cola de forma natural.
 
+### Auto-encadenado: drenar la cola entera sin re-ejecutar a mano
+
+Tras `Insert Cluster Analysis`, `More Unanalyzed Than This Batch?` comprueba si `Filter Unanalyzed Clusters` encontró más clusters de los que cupieron en este lote (`> 5`). Si es así, `Call '05-llm-analysis' Again` se llama a sí mismo (referencia al propio workflow) para procesar el siguiente lote; si no, `Queue Drained - Stopping` termina la cadena. Un solo disparo manual (o, en el futuro, un único disparo programado) drena toda la cola disponible ese día, en lotes de 5, hasta vaciarla o toparse con el límite diario — lo que llegue antes. Acotado de forma natural por dos condiciones de parada independientes (cola vacía, tope de 25), sin riesgo de recursión infinita.
+
+`More Unanalyzed Than This Batch?` tiene `executeOnce: true` — no por necesidad estricta (`Insert Cluster Analysis` ya converge a un único item de salida pase lo que pase), pero es una salvaguarda barata dado que su condición no depende de qué item concreto llegue.
+
 ### Tope duro diario, calibrado contra los límites reales de Groq (no un número arbitrario)
 
 Antes de `Limit Batch Size`, `Count Groq Calls Today` cuenta cuántas filas tiene `cluster_analysis` en las últimas 24h; si son **25 o más**, el nodo `Under Daily Cap?` corta la rama entera hacia `⛔ Daily Cap Reached - Skipping Groq` y no se hace ninguna llamada más ese día. No depende de que Groq rechace peticiones por su cuenta — es un límite propio, verificado en Postgres antes de gastar ni una llamada.

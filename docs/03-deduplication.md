@@ -38,6 +38,7 @@ When Executed by Another Workflow
     → Validate Normalization (IF: normalization_valid is true)
         true  → Collect Links (Code) → Check Seen Links (Postgres SELECT)
                   → Filter New Items (Code) → Insert New Links (Postgres INSERT)
+                  → Return New Articles (Code)
         false → Discarded - invalid normalization (NoOp, rama de inspección)
 ```
 
@@ -113,6 +114,16 @@ ON CONFLICT (link) DO NOTHING;
 ```
 
 El `ON CONFLICT DO NOTHING` da idempotencia: reejecutar el workflow sobre los mismos datos no falla ni duplica.
+
+### Return New Articles (Code, Run Once for All Items)
+
+```javascript
+return $('Filter New Items').all();
+```
+
+**Bug real encontrado al añadir fuentes nuevas (20minutos, La Vanguardia, Europa Press) y probar con volumen alto de artículos genuinamente nuevos:** `Insert New Links` no tiene `RETURNING` en su `INSERT`, así que su salida es solo la confirmación de Postgres (`{"success": true}`), no las filas insertadas. Como era el nodo terminal del workflow, eso es lo que recibía `04-clustering` al llamar a este sub-workflow — no la lista real de artículos nuevos. `Prepare Embedding Input` en 04 filtraba ese objeto (sin `title`) a una lista vacía, `Check Has New Items` daba `false`, y el pipeline nunca generaba embeddings para nada genuinamente nuevo.
+
+No se detectó antes porque, en la práctica, casi todas las ejecuciones de prueba durante el desarrollo se hicieron sobre una tabla `seen_articles` ya poblada de sesiones anteriores — la rama "sí hay artículos nuevos" de 04-clustering casi nunca se ejercitaba con datos reales. Añadir fuentes nuevas con cientos de artículos genuinamente nuevos fue lo que lo hizo visible.
 
 ## Flujo de datos
 
