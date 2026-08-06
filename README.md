@@ -30,13 +30,13 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 | 02 | Normalización | ✅ Implementado | [`docs/02-normalization.md`](docs/02-normalization.md) |
 | 03 | Deduplicación | ✅ Implementado | [`docs/03-deduplication.md`](docs/03-deduplication.md) |
 | 04 | Clustering (mismo acontecimiento) | ✅ Implementado | [`docs/04-clustering.md`](docs/04-clustering.md) |
-| 05 | Análisis LLM | ⏳ Construido, sin validar en ejecución real de n8n | [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md) |
-| 06 | Quality Filter | ⏳ Roadmap | — |
+| 05 | Análisis LLM | ✅ Implementado | [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md) |
+| 06 | Quality Filter | ✅ Implementado | [`docs/06-quality-filter.md`](docs/06-quality-filter.md) |
 | 07 | Categorización | ⏳ Roadmap | — |
 | 08 | Construcción del briefing | ⏳ Roadmap | — |
 | 09 | Entrega | ⏳ Roadmap | — |
 
-**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica, agrupa y analiza (comparando fuentes, señalando discrepancias) noticias del mismo acontecimiento entre 7 fuentes — todavía no genera un briefing.**
+**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica y agrupa noticias del mismo acontecimiento entre 7 fuentes, y genera dos tipos de análisis LLM: comparación entre medios para lo corroborado por varias fuentes, y filtrado/categorización para lo publicado por una sola — todavía no ensambla el briefing final.**
 
 ---
 
@@ -63,7 +63,7 @@ Schedule Trigger
 05 · Análisis LLM ── Groq (llama-3.3-70b-versatile, nivel gratuito), compara fuentes, distingue hechos de interpretaciones, señala discrepancias
       │
       ▼
-06 · Quality Filter ⏳
+06 · Quality Filter ── Groq (llama-3.1-8b-instant), filtra/categoriza/resume piezas de fuente única para la sección secundaria
       │
       ▼
 07 · Categorización ⏳
@@ -84,7 +84,8 @@ Schedule Trigger
 | Orquestación | n8n (self-hosted) | Automatización visual, control total sobre el pipeline |
 | Base de datos | PostgreSQL + `pgvector` | Persistencia robusta: trazabilidad de deduplicación, artículos normalizados con embeddings nativos (`vector(1024)`) y similitud coseno calculada en SQL |
 | Embeddings | Ollama + `bge-m3` (self-hosted) | Coste cero, multilingüe de fábrica, sin dependencia de una API externa de pago |
-| Análisis LLM | Groq API (`llama-3.3-70b-versatile`), nivel gratuito | Modelo open-weight, coste $0 a este volumen; se probó Ollama local primero pero la CPU compartida del portátil no daba fiabilidad ni escalaba con más fuentes — ver [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md) |
+| Análisis LLM (05, multi-fuente) | Groq API (`llama-3.3-70b-versatile`), nivel gratuito | Modelo open-weight, coste $0 a este volumen; se probó Ollama local primero pero la CPU compartida del portátil no daba fiabilidad ni escalaba con más fuentes — ver [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md) |
+| Quality Filter (06, fuente única) | Groq API (`llama-3.1-8b-instant`), nivel gratuito | Mismo proveedor, modelo distinto: 500K tokens/día frente a 100K, necesario para el volumen de piezas de fuente única (cientos/día) — ver [`docs/06-quality-filter.md`](docs/06-quality-filter.md) |
 | Infraestructura | Docker Compose | Entorno reproducible, sin dependencias manuales |
 | Fuentes de noticias | RSS | Gratuito, sin necesidad de scraping ni APIs de pago |
 | Secretos | `.env` / `.env.example` | Nunca se versionan credenciales |
@@ -123,11 +124,11 @@ En n8n, crea una credencial `Header Auth` llamada "Groq API" (`Authorization` / 
 
 Los workflows implementados están exportados en [`workflows/`](workflows/):
 
-1. En n8n, `⋮` → `Import from File` → importa, en este orden: `01-ingestion-rss.json`, `02-normalization.json`, `03-deduplication.json`, `04-clustering.json`, `05-llm-analysis.json`
-2. Publica los cinco workflows (`Publish` en la esquina superior derecha del editor)
-3. En `05-llm-analysis`, asigna la credencial "Groq API" al nodo "Call Groq for Analysis" (ver arriba)
+1. En n8n, `⋮` → `Import from File` → importa, en este orden: `01-ingestion-rss.json`, `02-normalization.json`, `03-deduplication.json`, `04-clustering.json`, `05-llm-analysis.json`, `06-quality-filter.json`
+2. Publica los seis workflows (`Publish` en la esquina superior derecha del editor)
+3. Asigna la credencial "Groq API" a los nodos "Call Groq for Analysis" (en `05-llm-analysis`) y "Call Groq for Filtering" (en `06-quality-filter`)
 
-Cada fase invoca a la anterior internamente (`Execute Workflow`) — no hace falta ejecutarlas por separado; basta con ejecutar `05-llm-analysis` para disparar todo el pipeline hasta ese punto.
+Cada fase invoca a la anterior internamente (`Execute Workflow`) — no hace falta ejecutarlas por separado; ejecuta `05-llm-analysis` para el briefing principal (clusters multi-fuente) o `06-quality-filter` para el secundario (fuente única) — ambos disparan `01`→`04` internamente.
 
 ---
 
@@ -152,13 +153,15 @@ news-briefing-ai/
 │   ├── 02-normalization.md
 │   ├── 03-deduplication.md
 │   ├── 04-clustering.md
-│   └── 05-llm-analysis.md
+│   ├── 05-llm-analysis.md
+│   └── 06-quality-filter.md
 └── workflows/
     ├── 01-ingestion-rss.json
     ├── 02-normalization.json
     ├── 03-deduplication.json
     ├── 04-clustering.json
-    └── 05-llm-analysis.json
+    ├── 05-llm-analysis.json
+    └── 06-quality-filter.json
 ```
 
 ---
@@ -167,10 +170,9 @@ news-briefing-ai/
 
 Decisiones ya tomadas para fases futuras, pendientes de implementar:
 
-- **Re-validar 05-llm-analysis con una ejecución real encadenada en n8n** tras los cambios de resiliencia y de procesamiento en cola (timeout 900s, reintentos, tope de 5 clusters/ejecución, no reanaliza links ya cubiertos) — ver [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md) para el porqué de cada decisión.
-- **Fase 00 (Trigger/Schedule)**: con 05 ya preparado para correr en cola de forma segura (tope por ejecución, no repite trabajo ya hecho), falta diseñar qué dispara el pipeline periódicamente.
+- **Fase 00 (Trigger/Schedule)**: con 05 y 06 ya preparados para correr en cola de forma segura (tope por ejecución, no repiten trabajo ya hecho), falta diseñar qué dispara el pipeline periódicamente.
 - **Identidad persistente de eventos**: hoy el clustering compara artículos dentro de una ventana de 24h; un evento en desarrollo durante varios días (ej. cobertura de un incendio) no se vincula todavía con artículos de días anteriores.
-- **Quality Filter en cascada**: filtro estructural por número de fuentes que cubren el mismo acontecimiento, seguido de un filtro LLM que rescata piezas de fuente única con valor periodístico (p. ej. exclusivas de investigación).
+- **Fase 08 (Briefing Builder)**: cómo combinar `cluster_analysis` (05, briefing principal) y `secondary_briefing_items` (06, sección secundaria por categorías) en el documento final — todavía sin diseñar.
 - **Cola de revisión humana asíncrona**, no bloqueante — nunca debe frenar la ejecución automática diaria.
 - **Extracción de contenido completo** del artículo (más allá del resumen del RSS) para dar más contexto al análisis LLM.
 - **Índice ANN (`ivfflat`/`hnsw`) sobre `pgvector`** si el volumen de artículos crece lo suficiente para que el self-join de similitud deje de ser trivial (ya migrado a `pgvector`; ver [`docs/04-clustering.md`](docs/04-clustering.md)).

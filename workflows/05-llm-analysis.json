@@ -9,7 +9,7 @@
       "typeVersion": 1.2,
       "position": [
         0,
-        64
+        160
       ],
       "id": "n05-trigger",
       "name": "When Executed by Another Workflow"
@@ -37,7 +37,7 @@
       "typeVersion": 1.3,
       "position": [
         224,
-        64
+        160
       ],
       "id": "n05-call04",
       "name": "Call '04-clustering'"
@@ -49,8 +49,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1792,
-        0
+        2016,
+        -32
       ],
       "id": "n05-buildprompt",
       "name": "Build Prompt per Cluster"
@@ -65,20 +65,20 @@
         "specifyBody": "json",
         "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($json.prompt) }} }],\n  \"temperature\": 0.1,\n  \"response_format\": {\"type\": \"json_object\"}\n}",
         "options": {
-          "timeout": 60000,
           "batching": {
             "batch": {
               "batchSize": 1,
               "batchInterval": 2000
             }
-          }
+          },
+          "timeout": 60000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2240,
-        0
+        2464,
+        -32
       ],
       "id": "n05-callgroq",
       "name": "Call Groq for Analysis",
@@ -100,8 +100,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2464,
-        0
+        2688,
+        -128
       ],
       "id": "n05-parse",
       "name": "Parse & Validate LLM Response"
@@ -134,7 +134,7 @@
       "typeVersion": 2.3,
       "position": [
         448,
-        64
+        160
       ],
       "id": "n05-filtersources",
       "name": "Filter Multi-Source Clusters"
@@ -145,7 +145,7 @@
       "typeVersion": 1,
       "position": [
         672,
-        160
+        256
       ],
       "id": "n05-skipsingle",
       "name": "Single Source - Skipped for Now"
@@ -157,8 +157,8 @@
       "type": "n8n-nodes-base.limit",
       "typeVersion": 1,
       "position": [
-        2016,
-        -120
+        2240,
+        -32
       ],
       "id": "n05-devlimit",
       "name": "⚠️ DEV ONLY - Limit to 2 Clusters",
@@ -171,7 +171,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2016,
+        2688,
         64
       ],
       "id": "n05-handlefailure",
@@ -188,7 +188,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2240,
+        2912,
         -32
       ],
       "id": "n05-insertanalysis",
@@ -210,18 +210,18 @@
       "typeVersion": 2.7,
       "position": [
         672,
-        -32
+        64
       ],
       "id": "n05-getlinks",
       "name": "Get Already-Analyzed Links",
       "executeOnce": true,
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
           "id": "z9SLVuZpj5X17xUz",
           "name": "Postgres account"
         }
-      },
-      "alwaysOutputData": true
+      }
     },
     {
       "parameters": {
@@ -231,7 +231,7 @@
       "typeVersion": 2,
       "position": [
         896,
-        -32
+        64
       ],
       "id": "n05-filterunanalyzed",
       "name": "Filter Unanalyzed Clusters"
@@ -243,8 +243,8 @@
       "type": "n8n-nodes-base.limit",
       "typeVersion": 1,
       "position": [
-        1568,
-        0
+        1792,
+        -32
       ],
       "id": "n05-batchlimit",
       "name": "Limit Batch Size (5/run)"
@@ -252,25 +252,25 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT count(*) AS calls_today FROM cluster_analysis WHERE analyzed_at >= NOW() - INTERVAL '24 hours';",
+        "query": "SELECT count(*) AS calls_today FROM cluster_analysis WHERE status = 'ok' AND analyzed_at >= NOW() - INTERVAL '24 hours';",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        896,
-        96
+        1120,
+        64
       ],
       "id": "n05-checkcap",
       "name": "Count Groq Calls Today",
+      "executeOnce": true,
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
           "id": "z9SLVuZpj5X17xUz",
           "name": "Postgres account"
         }
-      },
-      "executeOnce": true,
-      "alwaysOutputData": true
+      }
     },
     {
       "parameters": {
@@ -299,8 +299,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        1120,
-        96
+        1344,
+        64
       ],
       "id": "n05-capif",
       "name": "Under Daily Cap? (<25)"
@@ -312,8 +312,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1344,
-        0
+        1568,
+        -32
       ],
       "id": "n05-restoreclusters",
       "name": "Restore Cluster List"
@@ -323,8 +323,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1344,
-        200
+        1568,
+        160
       ],
       "id": "n05-capreached",
       "name": "⛔ Daily Cap Reached (25) - Skipping Groq"
@@ -356,8 +356,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        2688,
-        0
+        3136,
+        -32
       ],
       "id": "n05-morework",
       "name": "More Unanalyzed Than This Batch?",
@@ -385,8 +385,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        2912,
-        -80
+        3360,
+        -128
       ],
       "id": "n05-callself",
       "name": "Call '05-llm-analysis' Again"
@@ -396,8 +396,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        2912,
-        80
+        3360,
+        64
       ],
       "id": "n05-queuedrained",
       "name": "Queue Drained - Stopping"
@@ -610,11 +610,11 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "cd687af2-3d53-40f2-9321-39f4498916e5",
+  "versionId": "c7e6678a-fd66-4a54-8771-d09335e6c8fe",
   "meta": null,
   "nodeGroups": [],
   "id": "EpfAWRMrKttE97F1",

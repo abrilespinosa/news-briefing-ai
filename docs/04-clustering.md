@@ -71,7 +71,7 @@ Execute Workflow Trigger
   → Call '03-deduplication'
   → Prepare Embedding Input (título + primeras 3 frases del contenido)
   → Check Has New Items (IF)
-      true  → Generate Embeddings (Ollama) → Merge Embeddings with Items → Insert Normalized Articles ─┐
+      true  → Generate Embeddings (Ollama, retryOnFail) → Merge Embeddings with Items → Insert Normalized Articles ─┐
       false → No New Articles - Skipping Clustering ──────────────────────────────────────────────────┤
                                                                                                           ▼
                                                           Get Articles for Clustering Window (ventana 24h, sin embeddings)
@@ -124,13 +124,13 @@ WHERE 1 - (a.embedding <=> b.embedding) >= 0.83;
 
 No se añadió índice `ivfflat`/`hnsw` sobre `embedding`: al volumen actual (cientos de artículos/ventana) el self-join secuencial es inmediato, y un índice ANN con tan pocas filas no aporta y complica el mantenimiento sin necesidad. Queda anotado como mejora futura si el volumen crece mucho.
 
-**Nota sobre `Compute Similarity Edges` y "Execute Once":** este nodo recibe como entrada los N artículos de la ventana (uno por item, desde `Get Articles for Clustering Window`). El comportamiento por defecto de un nodo Postgres en n8n es ejecutar su query **una vez por cada item de entrada** — como esta query es estática (no depende de ningún campo del item), sin la opción `executeOnce: true` activada, n8n repetía la misma consulta N veces y concatenaba los resultados (con 504 artículos, se detectaron 10.080 aristas en vez de las 20 reales — 504×20). El resultado final de clustering no cambiaba porque Union-Find es idempotente ante aristas repetidas, pero la query pesada se ejecutaba N veces de más. Con `executeOnce` activado, se ejecuta una sola vez sin importar cuántos items lleguen.
+**`Compute Similarity Edges` tiene `executeOnce: true`:** por defecto, un nodo Postgres en n8n ejecuta su query una vez por cada item de entrada. Esta query es estática (no depende de ningún campo del item), así que sin `executeOnce` se repetiría N veces — mismo resultado final (Union-Find es idempotente ante aristas repetidas), pero con una query pesada ejecutándose N veces de más.
 
 ## Validación
 
 Sobre 284 artículos reales (4 fuentes, mismo día): 276 clusters, 7 de ellos multi-fuente y confirmados manualmente como el mismo evento cubierto por medios distintos — incluyendo un caso con cifras discrepantes entre fuentes (10 vs. 9 muertos en un mismo ataque), el tipo de discrepancia que la fase 06 deberá señalar. Sin falsos positivos detectados en revisión manual.
 
-**Tras la migración a pgvector**, se validó además la estabilidad: sobre los 496 artículos acumulados en la ventana de 24h, se comparó el resultado del cálculo antiguo (fuerza bruta en Python, fuera de n8n) contra el nuevo pipeline SQL — mismos 18 pares por encima del umbral, mismos 479 clusters totales (15 multi-fuente), y resultado idéntico en 5 ejecuciones consecutivas. Antes de este cambio, ejecuciones consecutivas sobre un conjunto fijo de 436 artículos habían dado 421, 51, 101 y 196 clusters — la inconsistencia no era del algoritmo sino del entorno de ejecución del Code node (ver sección de arquitectura).
+**Tras la migración a pgvector**, se validó además la estabilidad: mismo resultado (mismos pares por encima del umbral, mismos clusters) en 5 ejecuciones consecutivas sobre el mismo conjunto de artículos — confirmando que el cálculo en SQL es determinista, a diferencia del Code node original (ver sección de arquitectura).
 
 ## Mejora futura
 

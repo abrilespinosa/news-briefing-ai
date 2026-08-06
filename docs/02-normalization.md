@@ -35,7 +35,7 @@ Campos recibidos desde `01-ingestion-rss` (output de su `Edit Fields`):
 
 ## Transformaciones aplicadas
 
-1. **Limpieza de HTML** (`raw_summary` → `content`): elimina tags, bloques `<script>`/`<style>`, decodifica entidades comunes (`&amp;`, `&quot;`, etc.) y colapsa espacios/saltos de línea.
+1. **Limpieza de HTML** (`raw_summary` → `content`): elimina tags, bloques `<script>`/`<style>`, decodifica entidades HTML (incluyendo vocales acentuadas y `ñ` — necesario porque algunas fuentes, como elDiario.es, las sirven sin decodificar en su RSS) y colapsa espacios/saltos de línea.
 2. **Normalización de fecha** (`published_date`): validación explícita vía `DateTime.fromISO` (Luxon). Si el valor no es un ISO 8601 válido, el campo queda en `null` en vez de propagar un dato incorrecto sin avisar.
 3. **Limpieza de URL** (`link`): elimina parámetros de tracking (`utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `ref`, `fbclid`). Necesario para que la fase de Deduplicación no trate como distintas dos URLs que apuntan al mismo artículo.
 4. **Idioma** (`language`, campo nuevo): mapeo estático por `source_name`. Todas las fuentes actuales son en español (`es`). Este mapeo tendrá que ampliarse si se añaden fuentes en otros idiomas.
