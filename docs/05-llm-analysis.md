@@ -34,7 +34,7 @@ El Code node que interpreta la respuesta del LLM tolera manías de formato conoc
 Un cluster lento o fallido no debe tumbar el resto del lote:
 
 - **Timeout de 60s** y **`retryOnFail`** (2 intentos) en la llamada a Groq.
-- **Batching** (1 petición cada 2s): el nivel gratuito de Groq limita tokens/minuto: disparar varias llamadas casi a la vez lo supera.
+- **1 cluster por ejecución, con 20s de espera antes de auto-encadenar el siguiente** (ver "Procesamiento en cola" más abajo): el nivel gratuito de Groq limita tokens/minuto, y el espaciado entre peticiones dentro de una misma ejecución no frena el salto a la siguiente ejecución recursiva — mismo problema y mismo arreglo que en 06-quality-filter.
 - **`onError: continueErrorOutput`**: un fallo tras los reintentos no detiene el workflow — se enruta a una rama de error separada que registra el fallo sin perder el resto del lote.
 - **Parseo aislado por item**: cada cluster se procesa en su propio try/catch; un JSON inválido marca ese cluster como `status: 'error'` sin interrumpir los demás.
 - **Persistencia en Postgres** (`cluster_analysis`): cada cluster analizado (o fallido) se inserta como registro propio, no como salida final agregada del workflow completo.
@@ -46,8 +46,8 @@ Un cluster lento o fallido no debe tumbar el resto del lote:
 
 - **`Get Already-Analyzed Links`**: los links que ya tienen un análisis `status='ok'` en las últimas 48h.
 - **`Filter Unanalyzed Clusters`**: descarta un cluster solo si *todos* sus artículos ya están cubiertos por un análisis previo exitoso — si se suma una fuente nueva a un evento ya analizado, se reprocesa entero (se acepta algo de trabajo redundante a cambio de simplicidad).
-- **Tope de 5 clusters por ejecución**: ninguna ejecución queda a merced de cuántos clusters haya ese día.
-- **Auto-encadenado**: al terminar un lote, el workflow comprueba si queda más por analizar y, si es así, se llama a sí mismo para el siguiente lote — un solo disparo (manual o, en el futuro, programado) drena toda la cola disponible hasta vaciarla o alcanzar el tope diario.
+- **1 cluster por ejecución**: ninguna ejecución queda a merced de cuántos clusters haya ese día.
+- **Auto-encadenado con espera**: al terminar un cluster, el workflow comprueba si queda más por analizar; si es así, espera 20s (calibrado bajo el límite de 12.000 tokens/minuto de este modelo) y se llama a sí mismo para el siguiente — un solo disparo (manual o, en el futuro, programado) drena toda la cola disponible hasta vaciarla o alcanzar el tope diario. La espera entre ejecuciones recursivas es necesaria porque el espaciado interno de un nodo no frena el salto a la siguiente ejecución.
 - **Tope diario de 25 análisis**, calibrado contra el límite real de Groq para este modelo (100.000 tokens/día ÷ ~3.000 tokens/análisis), verificado en Postgres antes de gastar ninguna llamada — y contando solo `status='ok'`, para que un intento fallido y reintentable no consuma presupuesto del tope dos veces.
 
 **Nota de n8n**: un workflow solo puede llamarse a sí mismo si está *publicado* (`active: true`) — llamar a otro workflow inactivo sí funciona, pero la auto-referencia no. Publicar exige además que toda la cadena de sub-workflows referenciados esté publicada también. Las seis fases del pipeline están publicadas por este motivo.
@@ -64,7 +64,7 @@ Execute Workflow Trigger
             → Count Groq Calls Today (Postgres, executeOnce)
             → Under Daily Cap? (<25)
                 true  → Restore Cluster List
-                      → Limit Batch Size (5/run)
+                      → Limit Batch Size (1/run)
                       → Build Prompt per Cluster
                       → ⚠️ DEV ONLY - Limit to 2 Clusters (desactivado por defecto)
                       → Call Groq for Analysis (llama-3.3-70b-versatile, retryOnFail, continueErrorOutput)
@@ -74,7 +74,7 @@ Execute Workflow Trigger
                                                   Insert Cluster Analysis (Postgres)
                                                                     ▼
                                         More Unanalyzed Than This Batch?
-                                            true  → Call '05-llm-analysis' Again (self)
+                                            true  → Wait 20s Before Next Batch → Call '05-llm-analysis' Again (self)
                                             false → Queue Drained - Stopping
                 false → ⛔ Daily Cap Reached - Skipping Groq
       false → Single Source - Skipped for Now (NoOp, tratado en 06)
