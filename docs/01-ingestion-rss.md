@@ -35,6 +35,9 @@ Manual Trigger
 | 20minutos | portada (1 feed) | `description` |
 | La Vanguardia | portada (1 feed) | `description` |
 | Europa Press | portada (1 feed) | `description` |
+| El Español | portada (1 feed) | `description` |
+
+**Otras fuentes evaluadas y descartadas:** RTVE (feeds sin actualizar desde 2022, ver más abajo), Público, La Razón, El Confidencial y Cadena SER (RSS caído, bloqueado o URL no localizable en el momento de comprobarlo), El Periódico (feed activo pero sin items).
 
 **RTVE evaluado y descartado:** sus feeds RSS (`rtve.es/rss/*.xml`) responden con HTTP 200 pero devuelven contenido sin actualizar desde mediados de 2022 — el servicio parece abandonado aunque las URLs sigan activas. Verificado con dos feeds distintos (`temas_noticias.xml`, `temas_espana.xml`) antes de descartarlo, no es un fallo puntual de uno solo.
 
@@ -55,7 +58,8 @@ Manual Trigger
     { "source_name": "ABC", "category": "portada", "rss_url": "https://www.abc.es/rss/2.0/portada/" },
     { "source_name": "20minutos", "category": "portada", "rss_url": "https://www.20minutos.es/rss" },
     { "source_name": "La Vanguardia", "category": "portada", "rss_url": "https://www.lavanguardia.com/rss/home.xml" },
-    { "source_name": "Europa Press", "category": "portada", "rss_url": "https://www.europapress.es/rss/rss.aspx" }
+    { "source_name": "Europa Press", "category": "portada", "rss_url": "https://www.europapress.es/rss/rss.aspx" },
+    { "source_name": "El Español", "category": "portada", "rss_url": "https://www.elespanol.com/rss/" }
   ]
 }
 ```
@@ -77,6 +81,7 @@ El mayor reto de esta fase fue que cada medio nombra sus campos RSS de forma dis
 | 20minutos | `description` |
 | La Vanguardia | `description` |
 | Europa Press | `description` |
+| El Español | `description` |
 
 > Nota: al pasar ABC de feeds Atom a feed de portada RSS 2.0, conviene reconfirmar el nombre exacto del campo de contenido — puede diferir del que tenían los feeds Atom descartados.
 
