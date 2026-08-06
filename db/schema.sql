@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS normalized_articles (
 -- status='error' guarda intentos fallidos (fallo de red/timeout con Ollama o
 -- respuesta no parseable) para que un cluster problemático no tumbe el resto
 -- del batch ni se pierda sin dejar rastro.
+-- status='superseded' es un análisis correcto que otro posterior, con más
+-- fuentes sobre el mismo suceso, ha dejado obsoleto (ver más abajo).
 CREATE TABLE IF NOT EXISTS cluster_analysis (
     id SERIAL PRIMARY KEY,
     cluster_id INTEGER NOT NULL,
@@ -40,8 +42,29 @@ CREATE TABLE IF NOT EXISTS cluster_analysis (
     analysis JSONB,
     status TEXT NOT NULL DEFAULT 'ok',
     error_message TEXT,
-    analyzed_at TIMESTAMPTZ DEFAULT now()
+    analyzed_at TIMESTAMPTZ DEFAULT now(),
+    -- Enriquecimiento de la fase 07: la categoría del RSS no sirve aquí (el 85%
+    -- de los artículos llegan como 'portada', y además es por artículo cuando el
+    -- cluster es un único suceso). 07 la asigna con un LLM sobre el cluster entero.
+    -- NULL = pendiente de categorizar: la ausencia de valor ES la cola de trabajo,
+    -- no hace falta columna de estado propia.
+    categoria TEXT,
+    categorized_at TIMESTAMPTZ,
+    -- Retirada de análisis obsoletos. 05 reanaliza un evento entero cuando se le
+    -- suma una fuente nueva (deliberado: 4 fuentes comparan mejor que 2), lo que
+    -- deja dos filas del mismo suceso. Al insertar la nueva, 05 marca la vieja
+    -- como status='superseded' y apunta aquí a la que la reemplaza.
+    -- No es deduplicación de entrada — eso es la fase 03, sobre artículos y por
+    -- link, y funciona: los links de ambas filas están una sola vez en
+    -- seen_articles. Aquí lo que sobra es una *salida* que ha quedado obsoleta.
+    -- Como todo consumidor (07, 08) ya filtra status='ok', lo heredan gratis.
+    superseded_by INTEGER REFERENCES cluster_analysis(id)
 );
+
+-- Para instalaciones que ya tenían cluster_analysis creada antes de las fases 07/08.
+ALTER TABLE cluster_analysis ADD COLUMN IF NOT EXISTS categoria TEXT;
+ALTER TABLE cluster_analysis ADD COLUMN IF NOT EXISTS categorized_at TIMESTAMPTZ;
+ALTER TABLE cluster_analysis ADD COLUMN IF NOT EXISTS superseded_by INTEGER REFERENCES cluster_analysis(id);
 
 -- Registro append-only del filtro de calidad de piezas de fuente única (fase 06).
 -- A diferencia de cluster_analysis, aquí "link" SÍ es una clave estable (viene

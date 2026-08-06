@@ -48,7 +48,8 @@ Un cluster lento o fallido no debe tumbar el resto del lote:
 - **`Filter Unanalyzed Clusters`**: descarta un cluster solo si *todos* sus artículos ya están cubiertos por un análisis previo exitoso — si se suma una fuente nueva a un evento ya analizado, se reprocesa entero (se acepta algo de trabajo redundante a cambio de simplicidad).
 - **1 cluster por ejecución**: ninguna ejecución queda a merced de cuántos clusters haya ese día.
 - **Auto-encadenado con espera**: al terminar un cluster, el workflow comprueba si queda más por analizar; si es así, espera 20s (calibrado bajo el límite de 12.000 tokens/minuto de este modelo) y se llama a sí mismo para el siguiente — un solo disparo (manual o, en el futuro, programado) drena toda la cola disponible hasta vaciarla o alcanzar el tope diario. La espera entre ejecuciones recursivas es necesaria porque el espaciado interno de un nodo no frena el salto a la siguiente ejecución.
-- **Tope diario de 25 análisis**, calibrado contra el límite real de Groq para este modelo (100.000 tokens/día ÷ ~3.000 tokens/análisis), verificado en Postgres antes de gastar ninguna llamada — y contando solo `status='ok'`, para que un intento fallido y reintentable no consuma presupuesto del tope dos veces.
+- **Tope diario de 25 análisis**, calibrado contra el límite real de Groq para este modelo (100.000 tokens/día ÷ ~3.000 tokens/análisis), verificado en Postgres antes de gastar ninguna llamada — y contando `status='ok'` y `status='superseded'` (esos tokens se gastaron), pero no `'error'`, para que un intento fallido y reintentable no consuma presupuesto del tope dos veces.
+- **El corte del tope es el día natural UTC, no una ventana deslizante de 24h.** No es un detalle cosmético: con ventana deslizante el tope se vuelve **autobloqueante** en cuanto existe un trigger programado. Si el trabajo de un día se hace más tarde que la hora del cron —por ejemplo, análisis a las 09:22 con el `Schedule Trigger` a las 07:00—, la ventana de 24h todavía está llena cuando el cron dispara al día siguiente, la corrida se salta el análisis, y la situación se perpetúa indefinidamente. Se detectó en la primera corrida real del orquestador (ver `docs/00-orchestrator.md`), con 20 clusters pendientes bloqueados. El día natural UTC además coincide con el reset real del presupuesto diario de Groq, así que es el corte correcto por partida doble.
 
 **Nota de n8n**: un workflow solo puede llamarse a sí mismo si está *publicado* (`active: true`) — llamar a otro workflow inactivo sí funciona, pero la auto-referencia no. Publicar exige además que toda la cadena de sub-workflows referenciados esté publicada también. Las seis fases del pipeline están publicadas por este motivo.
 
@@ -96,6 +97,24 @@ Execute Workflow Trigger
 `hechos_confirmados` son solo los hechos en los que coinciden todas las fuentes citadas; `interpretaciones` marca juicios de valor o adjetivos calificativos atribuidos a una fuente concreta; `discrepancias` recoge datos distintos entre fuentes sobre el mismo hecho (una diferencia de precisión, como "misiles" vs. "misiles y drones", cuenta como discrepancia factual, no como interpretación); `preguntas_abiertas` es lo que ninguna fuente resuelve todavía.
 
 **Tabla `cluster_analysis`** (ver `db/schema.sql`): un registro por cluster procesado — `cluster_id, source_count, sources, articles, analysis, status, error_message, analyzed_at`. Sin `UNIQUE` sobre `cluster_id` (no es estable entre ejecuciones de 04): es un log append-only, no una tabla de estado.
+
+### Retirada de análisis obsoletos
+
+El filtro de cola reanaliza un evento entero cuando se le suma una fuente nueva. Eso es deliberado —un análisis con 4 fuentes compara mejor que uno con 2— pero deja dos filas del mismo suceso en la tabla.
+
+Esa segunda fila **no es un duplicado de entrada**: la deduplicación de artículos por `link` es la fase 03 y funciona (los links de ambas filas aparecen una sola vez en `seen_articles`). Lo que sobra es una *salida* que ha quedado obsoleta, y 03 no podría detectarlo aunque quisiera: se ejecuta antes que 04 y 05, cuando todavía no existe ningún cluster ni ningún análisis que pueda quedar reemplazado.
+
+Quien sí lo sabe es 05, en el momento exacto de escribir. Por eso `Insert Cluster Analysis` no es un `INSERT` a secas sino un CTE que inserta y, en la misma sentencia, marca como `status='superseded'` (con `superseded_by` apuntando a la nueva fila) todo análisis previo que comparta algún link y no tenga más fuentes. Va en una sola sentencia y no en dos nodos porque un fallo entre insertar y retirar dejaría dos análisis vivos del mismo suceso.
+
+- **Gana el análisis más rico, no el más reciente.** El criterio es `source_count`; la fecha solo desempata. Cuando 05 reprocesa, las fuentes del análisis viejo son un subconjunto de las del nuevo, así que retirarlo no pierde información.
+- **Compartir un solo link basta** para considerarlos el mismo suceso: 04 asigna cada artículo a un único cluster por ejecución.
+- **Los consumidores lo heredan gratis.** 07 y 08 ya filtran `status = 'ok'`, así que no necesitan ninguna lógica de deduplicación propia. Antes de esto, 07 llegó a gastar tokens categorizando las dos mitades de un mismo suceso.
+- **El tope diario cuenta `'ok'` y `'superseded'`.** Esos tokens se gastaron de verdad; descontarlos del tope al retirar el análisis dejaría gastar por encima del presupuesto real de Groq.
+- **`alwaysOutputData` en el nodo**: en el caso normal (sin duplicado que retirar) el `UPDATE` no afecta a ninguna fila y el nodo emitiría 0 items, cortando el auto-encadenado que cuelga justo detrás.
+
+Esto trata el síntoma en la capa correcta, no la causa raíz: la razón de fondo es que 04 no persiste identidad de evento entre ejecuciones (ver `docs/04-clustering.md`). Mientras eso siga así, seguirán generándose análisis que otro reemplaza.
+
+> **⚠️ Pendiente de comprobación en ejecución real.** La sentencia SQL está validada contra datos de producción dentro de una transacción revertida (retiró las dos filas correctas y ninguna otra), y el arrastre de los duplicados ya existentes se aplicó correctamente. Lo que **no** se ha observado todavía es el nodo ejecutándose dentro de n8n: la primera corrida del orquestador topó el tope diario y 05 no llegó al `INSERT`. El punto concreto a vigilar es que `alwaysOutputData` cumpla su función cuando el `UPDATE` no afecta a ninguna fila —el caso normal, sin duplicado que retirar—, porque si el nodo emitiera 0 items cortaría el auto-encadenado que cuelga justo detrás.
 
 **Concisión sin sobre-resumir:** el prompt pide 1-3 frases directas por campo de texto, sin sacrificar información necesaria para entender el hecho — no es "acorta al máximo", es evitar relleno mientras se mantiene la sustancia.
 
