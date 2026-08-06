@@ -2,3 +2,7 @@
 postgres_data/
 n8n_data/
 .DS_Store
+
+# Contexto local de Claude Code (no versionado)
+CLAUDE.md
+CLAUDE_CONTEXT.md
