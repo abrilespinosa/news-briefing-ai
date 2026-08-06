@@ -237,9 +237,7 @@
       "name": "Filter Unanalyzed Clusters"
     },
     {
-      "parameters": {
-        "maxItems": 5
-      },
+      "parameters": {},
       "type": "n8n-nodes-base.limit",
       "typeVersion": 1,
       "position": [
@@ -247,7 +245,7 @@
         -32
       ],
       "id": "n05-batchlimit",
-      "name": "Limit Batch Size (5/run)"
+      "name": "Limit Batch Size (1/run)"
     },
     {
       "parameters": {
@@ -342,7 +340,7 @@
             {
               "id": "morework1",
               "leftValue": "={{ $('Filter Unanalyzed Clusters').all().length }}",
-              "rightValue": 5,
+              "rightValue": 1,
               "operator": {
                 "type": "number",
                 "operation": "gt"
@@ -385,7 +383,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        3360,
+        3584,
         -128
       ],
       "id": "n05-callself",
@@ -401,6 +399,20 @@
       ],
       "id": "n05-queuedrained",
       "name": "Queue Drained - Stopping"
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        -128
+      ],
+      "id": "n05-wait",
+      "name": "Wait 20s Before Next Batch",
+      "webhookId": "n05-wait-webhook"
     }
   ],
   "pinData": {},
@@ -500,17 +512,6 @@
         ]
       ]
     },
-    "Limit Batch Size (5/run)": {
-      "main": [
-        [
-          {
-            "node": "Build Prompt per Cluster",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Call Groq for Analysis": {
       "main": [
         [
@@ -555,7 +556,7 @@
       "main": [
         [
           {
-            "node": "Limit Batch Size (5/run)",
+            "node": "Limit Batch Size (1/run)",
             "type": "main",
             "index": 0
           }
@@ -595,7 +596,7 @@
       "main": [
         [
           {
-            "node": "Call '05-llm-analysis' Again",
+            "node": "Wait 20s Before Next Batch",
             "type": "main",
             "index": 0
           }
@@ -608,13 +609,35 @@
           }
         ]
       ]
+    },
+    "Limit Batch Size (1/run)": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt per Cluster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20s Before Next Batch": {
+      "main": [
+        [
+          {
+            "node": "Call '05-llm-analysis' Again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "c7e6678a-fd66-4a54-8771-d09335e6c8fe",
+  "versionId": "7fc6b275-384c-416b-ac66-5459ad06529b",
   "meta": null,
   "nodeGroups": [],
   "id": "EpfAWRMrKttE97F1",
