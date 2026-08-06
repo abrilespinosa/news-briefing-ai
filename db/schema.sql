@@ -40,8 +40,19 @@ CREATE TABLE IF NOT EXISTS cluster_analysis (
     analysis JSONB,
     status TEXT NOT NULL DEFAULT 'ok',
     error_message TEXT,
-    analyzed_at TIMESTAMPTZ DEFAULT now()
+    analyzed_at TIMESTAMPTZ DEFAULT now(),
+    -- Enriquecimiento de la fase 07: la categoría del RSS no sirve aquí (el 85%
+    -- de los artículos llegan como 'portada', y además es por artículo cuando el
+    -- cluster es un único suceso). 07 la asigna con un LLM sobre el cluster entero.
+    -- NULL = pendiente de categorizar: la ausencia de valor ES la cola de trabajo,
+    -- no hace falta columna de estado propia.
+    categoria TEXT,
+    categorized_at TIMESTAMPTZ
 );
+
+-- Para instalaciones que ya tenían cluster_analysis creada antes de la fase 07.
+ALTER TABLE cluster_analysis ADD COLUMN IF NOT EXISTS categoria TEXT;
+ALTER TABLE cluster_analysis ADD COLUMN IF NOT EXISTS categorized_at TIMESTAMPTZ;
 
 -- Registro append-only del filtro de calidad de piezas de fuente única (fase 06).
 -- A diferencia de cluster_analysis, aquí "link" SÍ es una clave estable (viene

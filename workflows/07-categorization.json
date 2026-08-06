@@ -1,0 +1,348 @@
+{
+  "name": "07-categorization",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "n07-trigger",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id,\n  source_count,\n  sources,\n  analysis->>'que_paso' AS que_paso,\n  (SELECT string_agg(a->>'title', ' | ') FROM jsonb_array_elements(articles) a) AS titles\nFROM cluster_analysis\nWHERE status = 'ok'\n  AND categoria IS NULL\nORDER BY id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "n07-getpending",
+      "name": "Get Uncategorized Clusters",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "haspending07",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "n07-haspending",
+      "name": "Has Clusters to Categorize?"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        672,
+        160
+      ],
+      "id": "n07-nothing",
+      "name": "Nothing to Categorize"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agrupa los clusters pendientes en lotes de 20. A diferencia de 05 (1 cluster\n// por llamada, prompt de miles de tokens con el texto completo de cada\n// artículo), aquí el input por cluster son ~60 tokens: el 'que_paso' que 05 ya\n// dejó escrito más los titulares. Caben muchos clusters en una sola llamada.\n//\n// El tamaño de lote no lo limita el contexto del modelo sino su techo de\n// 6.000 tokens/minuto: 20 clusters son ~3.000 tokens, media ventana de un\n// minuto. De ahí el batchInterval de 40s del nodo HTTP (ver docs/07).\nconst BATCH_SIZE = 20;\nconst clusters = $input.all().map(item => item.json);\n\nconst batches = [];\nfor (let i = 0; i < clusters.length; i += BATCH_SIZE) {\n  batches.push(clusters.slice(i, i + BATCH_SIZE));\n}\n\nreturn batches.map(batch => ({ json: { clusters: batch } }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "n07-chunk",
+      "name": "Chunk into Batches of 20"
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_TITLES_CHARS = 300;\n\nconst RULES = `Eres un editor de noticias. Vas a asignar una categoría temática a una lista de acontecimientos. Cada acontecimiento viene descrito por lo que pasó y por los titulares con los que distintos medios lo cubrieron.\n\nAsigna a cada acontecimiento exactamente UNA categoría de esta lista cerrada, según su alcance:\n- internacional: hechos ocurridos fuera de España o entre países (política exterior, conflictos, gobiernos extranjeros, catástrofes en el extranjero).\n- economia: mercados, bolsa, empresas, fusiones, empleo, precios, banca, moneda, política monetaria o fiscal, finanzas de particulares.\n- tecnologia: informática, internet, inteligencia artificial, ciberseguridad, telecomunicaciones, electrónica de consumo.\n- ciencia: investigación científica, medicina, espacio, hallazgos y estudios.\n- espana: política, instituciones, justicia, administración y sucesos de ámbito español.\n- cultura: arte, música, cine, series, literatura, espectáculo, celebridades y patrimonio.\n- deportes: competición deportiva, sus protagonistas e instituciones.\n- sociedad: SOLO si no encaja en ninguna de las anteriores (educación, salud pública, conflictos laborales, fenómenos sociales).\n\nCriterios de desempate:\n- Clasifica por la materia del hecho, no por el país donde ocurre ni por quién lo protagoniza.\n- Si un hecho ocurre en España pero su materia principal es económica, tecnológica, científica, cultural o deportiva, prevalece esa materia sobre \"espana\".\n- Del mismo modo, si un hecho ocurre fuera de España pero su materia principal es económica, tecnológica, científica, cultural o deportiva, prevalece esa materia sobre \"internacional\". Reserva \"internacional\" para política exterior, conflictos armados y gobiernos de otros países.\n- No uses \"sociedad\" si alguna categoría concreta encaja.\n\nNo inventes categorías ni uses ninguna fuera de la lista. Responde ÚNICAMENTE con un JSON: un array \"clusters\" con un objeto por acontecimiento, en el mismo orden en que se dan, cada uno con \"indice\" (el número del acontecimiento) y \"categoria\".`;\n\nconst items = $input.all();\n\nreturn items.map(item => {\n  const batch = item.json.clusters;\n  const blocks = batch.map((c, i) => {\n    const titles = String(c.titles || '').slice(0, MAX_TITLES_CHARS);\n    return `[${i}] Qué pasó: ${c.que_paso || '(sin resumen)'}\\nTitulares: ${titles}`;\n  });\n  const prompt = `${RULES}\\n\\nAcontecimientos:\\n\\n${blocks.join('\\n\\n')}`;\n\n  return {\n    json: {\n      clusters: batch,\n      prompt\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "id": "n07-buildprompt",
+      "name": "Build Prompt per Batch"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-8b-instant\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($json.prompt) }} }],\n  \"temperature\": 0,\n  \"response_format\": {\"type\": \"json_object\"}\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 40000
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "n07-callgroq",
+      "name": "Call Groq for Categorization",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 20000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "FzTkQDMGTIRwjVfc",
+          "name": "Groq API"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const VALID = ['internacional', 'economia', 'tecnologia', 'ciencia', 'espana', 'cultura', 'deportes', 'sociedad'];\n\nfunction stripTrailingCommas(text) {\n  return text.replace(/,(\\s*[}\\]])/g, '$1');\n}\n\nfunction extractJson(raw) {\n  const withoutThink = raw.replace(/<think>[\\s\\S]*?<\\/think>/i, '').trim();\n  const cleaned = stripTrailingCommas(withoutThink);\n  try {\n    return JSON.parse(cleaned);\n  } catch (e) {\n    const start = cleaned.indexOf('{');\n    const end = cleaned.lastIndexOf('}');\n    if (start === -1 || end === -1 || end <= start) {\n      throw new Error(`No se encontró un JSON válido en la respuesta del LLM. Respuesta cruda (primeros 500 caracteres): ${raw.slice(0, 500)}`);\n    }\n    const candidate = cleaned.slice(start, end + 1);\n    try {\n      return JSON.parse(candidate);\n    } catch (e2) {\n      throw new Error(`JSON extraído no parseable: ${e2.message}. Candidato (primeros 500 caracteres): ${candidate.slice(0, 500)}`);\n    }\n  }\n}\n\n// Normaliza acentos/mayúsculas antes de validar: el modelo devuelve a veces\n// \"España\" o \"Economía\" pese a que el prompt pide la lista sin tildes.\nfunction normalize(value) {\n  return String(value || '')\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .trim()\n    .toLowerCase();\n}\n\nconst items = $input.all();\nconst output = [];\n\nitems.forEach((item, idx) => {\n  // itemMatching resuelve el lote de origen real vía pairedItem, no por posición\n  // dentro de esta rama: n8n reindexa desde 0 cada rama de un split éxito/error.\n  const batchClusters = $('Build Prompt per Batch').itemMatching(idx).json.clusters;\n\n  let results;\n  try {\n    const raw = item.json.choices?.[0]?.message?.content;\n    if (!raw) {\n      throw new Error(`Respuesta de Groq sin contenido esperado. Payload recibido: ${JSON.stringify(item.json).slice(0, 500)}`);\n    }\n    const parsed = extractJson(raw);\n    results = parsed.clusters || parsed;\n    if (!Array.isArray(results)) {\n      throw new Error(`Se esperaba un array \"clusters\" en la respuesta. JSON recibido: ${JSON.stringify(parsed).slice(0, 500)}`);\n    }\n  } catch (e) {\n    // Lote entero no parseable: no se emite ninguna fila. Sus clusters se quedan\n    // con categoria NULL, que es exactamente la cola de trabajo — reentran solos\n    // en la próxima ejecución sin necesidad de columna de estado.\n    console.log(`Lote ${idx} descartado: ${e.message}`);\n    return;\n  }\n\n  batchClusters.forEach((cluster, i) => {\n    const r = results.find(x => x.indice === i) || results[i];\n    const categoria = normalize(r?.categoria);\n\n    if (!VALID.includes(categoria)) {\n      // Categoría ausente o fuera de la lista cerrada: se deja sin escribir en\n      // vez de forzar un valor inventado. Sigue en cola para el próximo intento.\n      console.log(`Cluster ${cluster.id} sin categoría válida (recibido: ${JSON.stringify(r?.categoria)})`);\n      return;\n    }\n\n    output.push({\n      json: {\n        id: cluster.id,\n        categoria,\n        que_paso: cluster.que_paso,\n        source_count: cluster.source_count\n      }\n    });\n  });\n});\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -96
+      ],
+      "id": "n07-parse",
+      "name": "Parse & Validate Categories"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rama de error de \"Call Groq for Categorization\" (onError: continueErrorOutput).\n// No escribe nada en Postgres a propósito: los clusters del lote fallido se\n// quedan con categoria NULL y vuelven a entrar en la cola en la siguiente\n// ejecución. La ausencia de categoría ya es el registro de \"pendiente\", así que\n// aquí solo se deja traza legible en el log de la ejecución.\nconst items = $input.all();\n\nreturn items.map((item, idx) => {\n  const batchClusters = $('Build Prompt per Batch').itemMatching(idx).json.clusters;\n  const errorMessage =\n    item.json?.error?.message ||\n    item.json?.error ||\n    item.json?.message ||\n    `Fallo en la llamada a Groq sin mensaje de error legible: ${JSON.stringify(item.json).slice(0, 300)}`;\n\n  return {\n    json: {\n      failed_cluster_ids: batchClusters.map(c => c.id),\n      error_message: String(errorMessage).slice(0, 1000)\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        112
+      ],
+      "id": "n07-handleerror",
+      "name": "Handle Groq Call Failure"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        112
+      ],
+      "id": "n07-retrylater",
+      "name": "Batch Failed - Stays in Queue"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cluster_analysis\nSET categoria = $2,\n    categorized_at = now()\nWHERE id = $1;",
+        "options": {
+          "queryReplacement": "=={{ [$json.id, $json.categoria] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        -96
+      ],
+      "id": "n07-update",
+      "name": "Update Cluster Categories",
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// El UPDATE de Postgres no devuelve las filas afectadas, así que sin este paso\n// el valor de retorno del workflow sería la confirmación vacía de Postgres en\n// vez de las categorías asignadas (mismo motivo que \"Return New Articles\" en\n// 03-deduplication).\nreturn $('Parse & Validate Categories').all();\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -96
+      ],
+      "id": "n07-return",
+      "name": "Return Categorized Clusters",
+      "executeOnce": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get Uncategorized Clusters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Uncategorized Clusters": {
+      "main": [
+        [
+          {
+            "node": "Has Clusters to Categorize?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Clusters to Categorize?": {
+      "main": [
+        [
+          {
+            "node": "Chunk into Batches of 20",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to Categorize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk into Batches of 20": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt per Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt per Batch": {
+      "main": [
+        [
+          {
+            "node": "Call Groq for Categorization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Groq for Categorization": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate Categories",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Groq Call Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate Categories": {
+      "main": [
+        [
+          {
+            "node": "Update Cluster Categories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Groq Call Failure": {
+      "main": [
+        [
+          {
+            "node": "Batch Failed - Stays in Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Cluster Categories": {
+      "main": [
+        [
+          {
+            "node": "Return Categorized Clusters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f93d5764-e6fa-4d78-bc4f-6b9e4e7385c8",
+  "meta": null,
+  "nodeGroups": [],
+  "id": "vBPEV3uN8nxJeWVp",
+  "tags": []
+}
