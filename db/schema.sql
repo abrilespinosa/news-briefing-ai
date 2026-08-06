@@ -42,3 +42,23 @@ CREATE TABLE IF NOT EXISTS cluster_analysis (
     error_message TEXT,
     analyzed_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Registro append-only del filtro de calidad de piezas de fuente única (fase 06).
+-- A diferencia de cluster_analysis, aquí "link" SÍ es una clave estable (viene
+-- directo de normalized_articles, no de una agrupación efímera de 04), así que
+-- se usa como clave de "ya procesado" para no reevaluar el mismo artículo en
+-- ejecuciones sucesivas. status='error' son intentos fallidos, reintentables;
+-- status='ok' con incluir=false es una exclusión ya decidida, no se reintenta.
+CREATE TABLE IF NOT EXISTS secondary_briefing_items (
+    id SERIAL PRIMARY KEY,
+    link TEXT NOT NULL,
+    title TEXT,
+    source_name TEXT,
+    categoria TEXT,
+    incluir BOOLEAN NOT NULL,
+    resumen_hechos TEXT,
+    status TEXT NOT NULL DEFAULT 'ok',
+    error_message TEXT,
+    processed_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_secondary_briefing_items_link ON secondary_briefing_items(link);

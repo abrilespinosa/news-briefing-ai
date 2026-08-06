@@ -121,9 +121,7 @@ El `ON CONFLICT DO NOTHING` da idempotencia: reejecutar el workflow sobre los mi
 return $('Filter New Items').all();
 ```
 
-**Bug real encontrado al añadir fuentes nuevas (20minutos, La Vanguardia, Europa Press) y probar con volumen alto de artículos genuinamente nuevos:** `Insert New Links` no tiene `RETURNING` en su `INSERT`, así que su salida es solo la confirmación de Postgres (`{"success": true}`), no las filas insertadas. Como era el nodo terminal del workflow, eso es lo que recibía `04-clustering` al llamar a este sub-workflow — no la lista real de artículos nuevos. `Prepare Embedding Input` en 04 filtraba ese objeto (sin `title`) a una lista vacía, `Check Has New Items` daba `false`, y el pipeline nunca generaba embeddings para nada genuinamente nuevo.
-
-No se detectó antes porque, en la práctica, casi todas las ejecuciones de prueba durante el desarrollo se hicieron sobre una tabla `seen_articles` ya poblada de sesiones anteriores — la rama "sí hay artículos nuevos" de 04-clustering casi nunca se ejercitaba con datos reales. Añadir fuentes nuevas con cientos de artículos genuinamente nuevos fue lo que lo hizo visible.
+`Insert New Links` no lleva `RETURNING` en su `INSERT`, así que su propia salida es solo la confirmación de Postgres, no las filas insertadas. Este nodo hace explícito el retorno real del workflow (la lista de artículos nuevos filtrados), que es lo que espera `04-clustering` al invocarlo — sin él, el nodo terminal del workflow sería la confirmación de escritura, no los datos.
 
 ## Flujo de datos
 
