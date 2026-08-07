@@ -32,6 +32,16 @@ services:
       N8N_PORT: 5678
       N8N_PROTOCOL: http
       WEBHOOK_URL: http://localhost:5678/
+      # Purga del historial de ejecuciones. n8n guarda el payload íntegro de cada
+      # nodo, y en este pipeline eso son cientos de artículos con embeddings de
+      # 1024 dimensiones: ~1,3 MB por ejecución de las fases 01-04. Con el tope
+      # por defecto (10.000 ejecuciones) la tabla execution_data llegaría a ~13 GB
+      # antes de que n8n limpiara nada; medido, alcanzó 1,2 GB en dos días.
+      # Se conserva historial suficiente para depurar una corrida (una diaria son
+      # ~20 ejecuciones) sin que crezca sin límite.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 168      # horas (7 días)
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: 300
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:

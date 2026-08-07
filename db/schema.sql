@@ -122,3 +122,15 @@ CREATE TABLE IF NOT EXISTS app_config (
     value TEXT NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Índices de las columnas por las que filtran las consultas del pipeline.
+-- Hoy las tablas son pequeñas y Postgres resuelve con recorrido secuencial, pero
+-- normalized_articles crece ~700 filas/día y 04 la consulta por processed_at en
+-- cada corrida; cluster_analysis la filtran 05 (tope diario), 07 (cola) y 08
+-- (selección del día).
+CREATE INDEX IF NOT EXISTS idx_normalized_articles_processed_at
+    ON normalized_articles(processed_at);
+CREATE INDEX IF NOT EXISTS idx_cluster_analysis_analyzed_at
+    ON cluster_analysis(analyzed_at);
+CREATE INDEX IF NOT EXISTS idx_cluster_analysis_status_categoria
+    ON cluster_analysis(status, categoria);

@@ -74,8 +74,9 @@
       "id": "df1c246c-9ce5-4c40-a35d-b5d52da75230",
       "name": "Generate Embeddings",
       "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 3000
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -88,7 +89,8 @@
         -48
       ],
       "id": "ea77ce6d-4d1e-45d2-ba50-a0f982806906",
-      "name": "Merge Embeddings with Items"
+      "name": "Merge Embeddings with Items",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -213,6 +215,30 @@
         }
       },
       "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Devuelve a la cola los artículos cuyo embedding falló.\n--\n-- 03 inserta los links en seen_articles ANTES de que 04 los embeba, así que sin\n-- este paso un fallo de Ollama los deja marcados como vistos y sin llegar nunca\n-- a normalized_articles: se pierden de forma permanente y silenciosa, porque 03\n-- no volverá a considerarlos en ninguna corrida futura.\n--\n-- Borrarlos de seen_articles hace que el fallo sea autorreparable: la corrida\n-- siguiente los vuelve a ingerir y a intentar. No se toca normalized_articles\n-- porque estos artículos nunca llegaron a entrar ahí.\nDELETE FROM seen_articles\nWHERE link = ANY($1::text[]);",
+        "options": {
+          "queryReplacement": "=={{ [$('Prepare Embedding Input').first().json.items.map(a => a.link)] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        160
+      ],
+      "id": "requeue-failed-embeddings",
+      "name": "Requeue Articles With Failed Embedding",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -258,6 +284,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Requeue Articles With Failed Embedding",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -284,6 +317,13 @@
         [
           {
             "node": "Insert Normalized Articles",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requeue Articles With Failed Embedding",
             "type": "main",
             "index": 0
           }
@@ -338,13 +378,26 @@
           }
         ]
       ]
+    },
+    "Requeue Articles With Failed Embedding": {
+      "main": [
+        [
+          {
+            "node": "Get Articles for Clustering Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
   },
-  "versionId": "a00e7b6d-40ca-4406-8dea-eb700cfc9eda",
+  "versionId": "cbdee0e4-aa12-4beb-8072-1b52519b8883",
   "meta": {
     "templateCredsSetupCompleted": true
   },

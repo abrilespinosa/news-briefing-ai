@@ -40,6 +40,8 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 
 Corrida real del 7 de agosto de 2026: 1.000 clusters detectados, 53 multi-fuente, 30 analizados, briefing de 30 acontecimientos en 7 categorías entregado 11 minutos después de arrancar, sin un solo fallo.
 
+Una segunda corrida ese mismo día ejercitó la **retirada de análisis obsoletos**: al ampliarse la ventana con artículos nuevos, dos sucesos ya cubiertos se reanalizaron con más fuentes (uno pasó de comparar 3 medios a comparar 4) y sus análisis anteriores quedaron marcados `superseded`. El briefing mantuvo 30 noticias — los mismos acontecimientos, dos de ellos mejor comparados.
+
 ---
 
 ## Arquitectura
@@ -95,7 +97,7 @@ El orquestador (fase 00) dispara a diario `05`, después `07`, `08` y `09`; las 
 | Quality Filter (06, fuente única) | Groq API (`llama-3.1-8b-instant`), nivel gratuito | Mismo proveedor, modelo distinto: 500K tokens/día frente a 100K, necesario para el volumen de piezas de fuente única (cientos/día) — ver [`docs/06-quality-filter.md`](docs/06-quality-filter.md) |
 | Categorización (07, multi-fuente) | Groq API (`llama-3.1-8b-instant`), nivel gratuito | Fase aparte y no un campo más en el prompt de 05: así cubre también los análisis ya hechos y no consume el presupuesto escaso del modelo de 05 — ver [`docs/07-categorization.md`](docs/07-categorization.md) |
 | Entrega (09) | Bot de Telegram | El HTML viaja como adjunto, no como enlace: el equipo que aloja el pipeline se suspende, así que cualquier URL servida por el propio n8n estaría caída al abrir la notificación — ver [`docs/09-delivery.md`](docs/09-delivery.md) |
-| Infraestructura | Docker Compose | Entorno reproducible, sin dependencias manuales |
+| Infraestructura | Docker Compose | Entorno reproducible, sin dependencias manuales. La purga del historial de ejecuciones va configurada de forma explícita: n8n guarda el payload íntegro de cada nodo y aquí eso son cientos de artículos con embeddings de 1024 dimensiones, ~1,3 MB por ejecución de las fases 01-04 |
 | Fuentes de noticias | RSS | Gratuito, sin necesidad de scraping ni APIs de pago |
 | Secretos | `.env` / `.env.example` | Nunca se versionan credenciales |
 
@@ -207,12 +209,13 @@ news-briefing-ai/
 
 Cosas implementadas y documentadas cuyo comportamiento **todavía no se ha observado en una ejecución real**. Se listan aquí en vez de darlas por buenas:
 
-- **La rama `UPDATE` del `supersede` de 05 sigue sin ejercitarse.** El nodo sí se ha ejecutado ya 30 veces dentro de n8n sin cortar el auto-encadenado, que era el riesgo real: como el `UPDATE` no lleva `RETURNING`, la sentencia devuelve cero filas **en toda** inserción y solo `alwaysOutputData` mantiene vivo el bucle. Lo que no se ha dado es un solapamiento que active el `UPDATE`, y hay una razón de fondo: con una corrida diaria y una ventana de agrupación de 24h, los clusters casi nunca cruzan ejecuciones. El escenario que motivó el CTE (un evento reanalizado al sumársele una fuente) aparece sobre todo con varias corridas manuales el mismo día.
 - **Ruta de error de la llamada a 05 desde el orquestador**: cableada para que 07 corra igualmente, nunca ejercitada.
 - **Rama `Nothing to Deliver` de 09**: requiere un día sin briefing, que solo ocurre si 05 y 07 no producen nada categorizado.
 - **09 no reintenta.** Si Telegram falla, el briefing queda en la tabla y no se reenvía. Reejecutar `09-delivery` a mano lo resuelve y no cuesta ni un token, pero no es automático.
 - **Divergencia conocida entre 06 y 07**: la regla de desempate de `internacional` introducida en 07 no está replicada en 06, que sigue pausado. Hay que replicarla antes de reanudarlo o las dos secciones del briefing usarán criterios distintos para la misma etiqueta.
 - **Densidad de divergencias a la baja**: 5 de 25 noticias el 6 de agosto, 3 de 30 el 7. Con dos días no hay tendencia, pero es la cifra que hay que vigilar: si el marcador de contradicción casi no aparece, el elemento diferencial del briefing se diluye.
+- **El reencolado por fallo de embeddings no avisa**: la corrida sigue y termina en `success`, así que una ingesta perdida solo se ve entrando al historial de n8n.
+- **El límite diario de Groq nunca se ha observado.** El tope de 30 análisis se calibra contra los 100.000 tokens/día que Groq documenta para este modelo, pero las cabeceras de la API solo exponen el bucket por minuto: todos los 429 que hemos visto eran por minuto, ninguno por día. El margen es autoimpuesto contra una cifra que no hemos podido confirmar en la cuenta.
 
 ## Roadmap técnico
 

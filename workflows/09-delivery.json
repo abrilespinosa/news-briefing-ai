@@ -120,7 +120,10 @@
           "name": "Telegram Meollo"
         }
       },
-      "webhookId": "acbcdc20-b32c-4cde-9ff7-fa072fb82b31"
+      "webhookId": "acbcdc20-b32c-4cde-9ff7-fa072fb82b31",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -178,7 +181,10 @@
           "name": "Telegram Meollo"
         }
       },
-      "webhookId": "72a6b258-9f47-4352-a4a4-1e8a6fa2fe67"
+      "webhookId": "72a6b258-9f47-4352-a4a4-1e8a6fa2fe67",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -205,7 +211,10 @@
           "name": "Telegram Meollo"
         }
       },
-      "webhookId": "4d8c8339-4b13-459c-af6b-f58970bcdd45"
+      "webhookId": "4d8c8339-4b13-459c-af6b-f58970bcdd45",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "pinData": null,
@@ -310,7 +319,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "3adaa3da-3c30-4ff4-a733-afa04b99b79a",
+  "versionId": "771218e9-517c-4449-84e1-7778f6bbace9",
   "meta": null,
   "nodeGroups": [],
   "id": "J6XYucPgjENBHKRr",
