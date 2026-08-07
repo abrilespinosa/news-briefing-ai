@@ -26,15 +26,23 @@ Anthropic no ofrece modelos de embeddings propios. En vez de depender de una API
 
 El clustering no depende de la corrida puntual de deduplicación: los artículos normalizados con su embedding se persisten en `normalized_articles`, y el clustering los recupera por ventana temporal (últimas 24h). Esto separa dos preguntas distintas — "¿ya vi este link?" (`seen_articles`) y "¿qué artículos comparo en esta ejecución de clustering?" (`normalized_articles` + ventana) — y permite que el clustering se ejecute independientemente de si hubo ingesta nueva en esa corrida.
 
-### Un embedding fallido no puede perder el artículo
+### Un artículo que no llega a persistirse no puede perderse
 
-Esa separación tiene una arista peligrosa: **03 inserta los links en `seen_articles` antes de que 04 los embeba.** Si Ollama falla, el artículo queda marcado como visto sin haber llegado nunca a `normalized_articles`, y 03 no lo volverá a considerar en ninguna corrida futura. No es un fallo ruidoso que se pueda reintentar: es una pérdida permanente y silenciosa.
+Esa separación tiene una arista peligrosa: **03 inserta los links en `seen_articles` antes de que 04 los persista.** Si algo falla por el camino, el artículo queda marcado como visto sin haber llegado nunca a `normalized_articles`, y 03 no lo volverá a considerar en ninguna corrida futura. No es un fallo ruidoso que se pueda reintentar: es una pérdida permanente y silenciosa.
 
-Y el alcance no es un artículo suelto. `Generate Embeddings` manda **todos los textos en una única petición** a Ollama, así que es todo o nada: un fallo se lleva la ingesta entera de esa corrida.
+Hay **tres** puntos por los que se puede llegar ahí, y no todos acotan lo mismo:
 
-El nodo `Requeue Articles With Failed Embedding` los borra de `seen_articles`, con lo que el fallo pasa a ser autorreparable — la corrida siguiente los vuelve a ingerir. Cubre las dos vías por las que puede llegar el problema: el error HTTP del nodo de embeddings y el `throw` por desajuste entre embeddings recibidos y artículos enviados, que antes tiraba el workflow dejando exactamente la misma basura.
+| Fallo | Alcance |
+|---|---|
+| `Generate Embeddings` (HTTP a Ollama) | La petición es única para toda la corrida — se lleva el lote entero |
+| `Merge Embeddings with Items` (`throw` por desajuste de longitud) | Igual: el lote entero |
+| `Insert Normalized Articles` (Postgres) | Solo los items que fallaron; n8n encamina el resto por la rama de éxito |
 
-**Tras reencolarlos, la corrida continúa hacia el clustering en vez de morir.** Agrupa lo que ya hay en la ventana de 24h, de modo que un fallo de embeddings degrada el briefing del día pero no lo cancela. Los reintentos del nodo son 3 con 10s entre medias, margen suficiente para el arranque en frío de Ollama cargando el modelo.
+Los tres desembocan en `Collect Links to Requeue`, que resuelve el alcance leyendo lo que le llega: si los items traen `link` propio son artículos concretos y se reencolan solo esos; si son objetos de error sin `link`, el fallo fue del lote y se reencola la corrida completa desde `Prepare Embedding Input`. Después, `Requeue Articles With Failed Embedding` los borra de `seen_articles` y el fallo pasa a ser autorreparable — la corrida siguiente los vuelve a ingerir.
+
+Reencolar de más es seguro: el `INSERT` es `ON CONFLICT (link) DO NOTHING`, así que un artículo que sí había entrado y vuelve a pasar por aquí no se duplica ni rompe nada. La asimetría es deliberada — el coste de reingerir un artículo de sobra es una petición RSS; el de perderlo es que no vuelve nunca.
+
+**Tras reencolarlos, la corrida continúa hacia el clustering en vez de morir.** Agrupa lo que ya hay en la ventana de 24h, de modo que un fallo degrada el briefing del día pero no lo cancela. Los reintentos son 3 con 10s entre medias en el nodo de embeddings (margen para el arranque en frío de Ollama cargando el modelo) y 3 con 5s en el `INSERT`.
 
 ### Algoritmo: similitud coseno en Postgres (`pgvector`) + Union-Find en n8n
 
@@ -83,6 +91,8 @@ Execute Workflow Trigger
   → Check Has New Items (IF)
       true  → Generate Embeddings (Ollama, retryOnFail) → Merge Embeddings with Items → Insert Normalized Articles ─┐
       false → No New Articles - Skipping Clustering ──────────────────────────────────────────────────┤
+                                                                                                          │
+      (las tres ramas de error) → Collect Links to Requeue → Requeue Articles With Failed Embedding ──────┤
                                                                                                           ▼
                                                           Get Articles for Clustering Window (ventana 24h, sin embeddings)
                                                                                                           ▼
@@ -141,6 +151,25 @@ No se añadió índice `ivfflat`/`hnsw` sobre `embedding`: al volumen actual (ci
 Sobre 284 artículos reales (4 fuentes, mismo día): 276 clusters, 7 de ellos multi-fuente y confirmados manualmente como el mismo evento cubierto por medios distintos — incluyendo un caso con cifras discrepantes entre fuentes (10 vs. 9 muertos en un mismo ataque), el tipo de discrepancia que la fase 06 deberá señalar. Sin falsos positivos detectados en revisión manual.
 
 **Tras la migración a pgvector**, se validó además la estabilidad: mismo resultado (mismos pares por encima del umbral, mismos clusters) en 5 ejecuciones consecutivas sobre el mismo conjunto de artículos — confirmando que el cálculo en SQL es determinista, a diferencia del Code node original (ver sección de arquitectura).
+
+### La forma real de la salida
+
+Conviene saber leer el número de items que devuelve esta fase, porque a primera vista desconcierta: **un item es un acontecimiento, no un artículo**, y aun así la cifra queda muy cerca del total de artículos. Ejecución del 7 de agosto de 2026, con 818 artículos en la ventana y 164 aristas por encima del umbral:
+
+| Artículos por cluster | Clusters |
+|---|---|
+| 1 | **667** |
+| 2 | 24 |
+| 3 | 9 |
+| 4 | 5 |
+| 5 | 3 |
+| 6 | 2 |
+| 7 | 3 |
+| 8 | 1 |
+
+714 clusters en total, que cubren exactamente los 818 artículos. **667 son de un solo artículo**: solo 47 clusters agrupan algo, absorbiendo 151 artículos entre todos. Y contando por medios en vez de por artículos, solo **43 clusters son multi-fuente** — los únicos que consume 05; los otros 671 los descarta en su primer `IF`.
+
+El embudo completo del pipeline queda así: 818 artículos → 714 acontecimientos → 43 multi-fuente → 30 analizados (tope de Groq). El estrechamiento no lo produce el clustering, sino un hecho del material de partida: **la gran mayoría de las noticias las publica un solo medio**. Un cluster de 8 artículos con 7 fuentes indica además que un medio publicó dos piezas del mismo suceso, caso que 05 maneja bien porque filtra por `source_count` y no por `article_count`.
 
 ## Mejora futura
 

@@ -179,7 +179,11 @@
           "id": "z9SLVuZpj5X17xUz",
           "name": "Postgres account"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -219,16 +223,16 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- Devuelve a la cola los artículos cuyo embedding falló.\n--\n-- 03 inserta los links en seen_articles ANTES de que 04 los embeba, así que sin\n-- este paso un fallo de Ollama los deja marcados como vistos y sin llegar nunca\n-- a normalized_articles: se pierden de forma permanente y silenciosa, porque 03\n-- no volverá a considerarlos en ninguna corrida futura.\n--\n-- Borrarlos de seen_articles hace que el fallo sea autorreparable: la corrida\n-- siguiente los vuelve a ingerir y a intentar. No se toca normalized_articles\n-- porque estos artículos nunca llegaron a entrar ahí.\nDELETE FROM seen_articles\nWHERE link = ANY($1::text[]);",
+        "query": "-- Devuelve a la cola los artículos que no llegaron a normalized_articles.\n--\n-- 03 inserta los links en seen_articles ANTES de que 04 los persista, así que un\n-- fallo aquí los deja marcados como vistos sin haber entrado nunca: se pierden\n-- de forma permanente y silenciosa, porque 03 no volverá a considerarlos.\n--\n-- Borrarlos de seen_articles hace que el fallo sea autorreparable: la corrida\n-- siguiente los vuelve a ingerir y a intentar. No se toca normalized_articles\n-- porque, o no llegaron a entrar, o el INSERT es ON CONFLICT DO NOTHING y el\n-- reintento no duplica nada.\nDELETE FROM seen_articles\nWHERE link = ANY($1::text[]);",
         "options": {
-          "queryReplacement": "=={{ [$('Prepare Embedding Input').first().json.items.map(a => a.link)] }}"
+          "queryReplacement": "={{ [$json.links] }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        896,
-        160
+        1344,
+        208
       ],
       "id": "requeue-failed-embeddings",
       "name": "Requeue Articles With Failed Embedding",
@@ -239,9 +243,21 @@
           "name": "Postgres account"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resuelve qué links hay que devolver a la cola. Aquí desembocan tres fallos\n// distintos y no todos acotan lo mismo:\n//\n//   - Generate Embeddings (HTTP) y Merge Embeddings (desajuste de longitud):\n//     la petición a Ollama es única para toda la corrida, así que el fallo se\n//     lleva el lote entero. El item que llega es un objeto de error, sin link.\n//   - Insert Normalized Articles: n8n encamina por la rama de error solo los\n//     items que fallaron, y esos SÍ son artículos con su propio link.\n//\n// De ahí la discriminación: si los items traen link, se reencolan exactamente\n// esos; si no, se reencola el lote completo desde el nodo que lo preparó.\nconst conLink = $input.all().map(i => i.json.link).filter(Boolean);\n\nconst links = conLink.length\n  ? [...new Set(conLink)]\n  : $('Prepare Embedding Input').first().json.items.map(a => a.link);\n\nreturn [{ json: { links, requeued: links.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        208
+      ],
+      "id": "c0113c74-req-collect-links",
+      "name": "Collect Links to Requeue"
     }
   ],
-  "pinData": {},
   "connections": {
     "When Executed by Another Workflow": {
       "main": [
@@ -287,7 +303,7 @@
         ],
         [
           {
-            "node": "Requeue Articles With Failed Embedding",
+            "node": "Collect Links to Requeue",
             "type": "main",
             "index": 0
           }
@@ -323,7 +339,7 @@
         ],
         [
           {
-            "node": "Requeue Articles With Failed Embedding",
+            "node": "Collect Links to Requeue",
             "type": "main",
             "index": 0
           }
@@ -335,6 +351,13 @@
         [
           {
             "node": "Get Articles for Clustering Window",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Collect Links to Requeue",
             "type": "main",
             "index": 0
           }
@@ -389,19 +412,29 @@
           }
         ]
       ]
+    },
+    "Collect Links to Requeue": {
+      "main": [
+        [
+          {
+            "node": "Requeue Articles With Failed Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": true,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "cbdee0e4-aa12-4beb-8072-1b52519b8883",
+  "versionId": "f822b78f-81d5-4470-baf4-55418b501724",
   "meta": {
     "templateCredsSetupCompleted": true
   },
-  "nodeGroups": [],
   "id": "bYXJuMvakml3lLLz",
-  "tags": []
+  "tags": [],
+  "pinData": {}
 }
