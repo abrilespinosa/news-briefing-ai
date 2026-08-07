@@ -103,3 +103,22 @@ CREATE TABLE IF NOT EXISTS briefings (
     content_html TEXT NOT NULL,
     generated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Configuración de despliegue que no es un secreto pero tampoco puede vivir en
+-- el JSON de un workflow versionado en un repositorio público (fase 09).
+--
+-- El camino natural sería una variable de entorno, pero n8n 2.x deniega $env en
+-- las expresiones salvo que se arranque con N8N_BLOCK_ENV_ACCESS_IN_NODE=false,
+-- y ese permiso es global: cualquier expresión de cualquier workflow pasaría a
+-- poder leer TODAS las variables del contenedor, incluida POSTGRES_PASSWORD.
+-- Las Variables nativas de n8n, que resolverían esto, son de licencia de pago.
+-- Postgres ya es el contrato entre fases, así que el valor se lee de aquí: 09 lo
+-- recoge con una subconsulta dentro del SELECT que ya hace sobre briefings, sin
+-- añadir ningún nodo.
+--
+-- Se rellena a mano en la instalación (ver README), igual que este mismo fichero.
+CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
