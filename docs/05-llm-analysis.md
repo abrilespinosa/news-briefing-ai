@@ -85,6 +85,7 @@ Execute Workflow Trigger
 ```json
 {
   "que_paso": "string",
+  "desarrollo": "string",
   "por_que_importa": "string",
   "impacto": "string",
   "hechos_confirmados": ["string"],
@@ -116,9 +117,40 @@ Esto trata el síntoma en la capa correcta, no la causa raíz: la razón de fond
 
 > **⚠️ Pendiente de comprobación en ejecución real.** La sentencia SQL está validada contra datos de producción dentro de una transacción revertida (retiró las dos filas correctas y ninguna otra), y el arrastre de los duplicados ya existentes se aplicó correctamente. Lo que **no** se ha observado todavía es el nodo ejecutándose dentro de n8n: la primera corrida del orquestador topó el tope diario y 05 no llegó al `INSERT`. El punto concreto a vigilar es que `alwaysOutputData` cumpla su función cuando el `UPDATE` no afecta a ninguna fila —el caso normal, sin duplicado que retirar—, porque si el nodo emitiera 0 items cortaría el auto-encadenado que cuelga justo detrás.
 
-**Concisión sin sobre-resumir:** el prompt pide 1-3 frases directas por campo de texto, sin sacrificar información necesaria para entender el hecho — no es "acorta al máximo", es evitar relleno mientras se mantiene la sustancia.
+**Concisión sin sobre-resumir:** el prompt pide 1-3 frases directas por campo de texto, sin sacrificar información necesaria para entender el hecho — no es "acorta al máximo", es evitar relleno mientras se mantiene la sustancia. `desarrollo` es la única excepción (ver abajo).
 
-**Truncado de contenido:** cada artículo se recorta a los primeros 2.000 caracteres antes de entrar al prompt, por tamaño de contexto/latencia — no es un recorte equilibrado entre fuentes (algunas dan mucho menos que otras, ver "Mejora futura").
+### `desarrollo`: el cuerpo de la noticia, y por qué su extensión no es fija
+
+El resto del esquema son fragmentos de análisis, no texto legible de corrido. Para que el briefing pudiera ofrecer algo más que un titular y una línea de contexto hizo falta un campo narrativo: `desarrollo`, el cuerpo de la noticia en prosa, con el detalle concreto que aporten las fuentes.
+
+**El límite de extensión se calcula en el Code node a partir del material real de cada cluster**, no es una cifra fija en el prompt:
+
+| Texto que aportan las fuentes | Techo |
+|---|---|
+| < 1.500 caracteres | 1 párrafo, 60 palabras |
+| < 4.000 caracteres | 1-2 párrafos, 130 palabras |
+| resto | 2-3 párrafos, 220 palabras |
+
+Esto no es refinamiento gratuito: **un objetivo de longitud fijo produce invención, y se midió.** Con la instrucción "entre 150 y 220 palabras", un cluster con 14.959 caracteres de fuentes devolvió 135 palabras honestas, mientras que uno con 928 caracteres devolvió **166** — más texto a partir de dieciséis veces menos material. Entre ellas, esta frase: *"ha permitido al partido aumentar su visibilidad y atraer a nuevos votantes"*, que no aparece en ninguna de las dos fuentes del cluster, más un tercer párrafo que repetía el primero con otras palabras.
+
+La lección es que **un objetivo de longitud convierte la extensión en la meta y la veracidad en el peaje**. El prompt pide ahora exhaustividad acotada —"incluye todos los hechos concretos que aparezcan en los textos y para cuando se te acaben; el número es un techo, no una cuota"— y prohíbe explícitamente deducir consecuencias que ninguna fuente afirma y cerrar con frases efectistas.
+
+Con el techo proporcional, un cluster rico produce 146-168 palabras ancladas (organismos, normativas, horarios, cifras) y uno pobre produce menos de diez. **Esas diez palabras son el comportamiento correcto**: con dos teasers de RSS que solo dicen que un partido subió en las encuestas, no hay más hechos que contar. La fase 08 lo asume y no ofrece el desplegable "Ver más" cuando el desarrollo no llega a 25 palabras.
+
+**Truncado de contenido:** cada artículo se recorta a los primeros 2.000 caracteres antes de entrar al prompt, por tamaño de contexto/latencia. El recorte casi nunca llega a activarse: lo que limita de verdad es cuánto entrega cada RSS, y ahí la diferencia entre fuentes es de dos órdenes de magnitud.
+
+| Fuente | Caracteres de media que entrega el RSS |
+|---|---|
+| elDiario.es | 6.236 |
+| ABC | 4.096 |
+| 20minutos | 2.988 |
+| El País | 689 |
+| La Vanguardia | 421 |
+| Europa Press | 296 |
+| El Español | 271 |
+| El Mundo | 174 |
+
+Sobre una jornada real, 11 de 25 clusters reunían más de 3.000 caracteres y 6 se quedaban por debajo de 1.500. Un cluster de El Mundo y La Vanguardia le da al modelo unos 600 caracteres: sobre eso no hay análisis posible que no sea inventado. Es el techo real del pipeline y la razón de que la extracción de contenido completo esté en el roadmap.
 
 ## Validación
 
