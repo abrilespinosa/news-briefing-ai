@@ -9,7 +9,7 @@
       "typeVersion": 1.2,
       "position": [
         0,
-        48
+        272
       ],
       "id": "36b38937-e9af-46b5-bf41-c7988d45af5a",
       "name": "When Executed by Another Workflow"
@@ -37,7 +37,7 @@
       "typeVersion": 1.3,
       "position": [
         224,
-        48
+        272
       ],
       "id": "09915035-462e-4795-ab39-6a54f6b90c2d",
       "name": "Call '02-normalization'"
@@ -48,7 +48,7 @@
       "typeVersion": 1,
       "position": [
         672,
-        144
+        368
       ],
       "id": "6402f71a-c6bc-44f5-a994-d61da9e3dd61",
       "name": "Discarded - invalid normalization"
@@ -61,7 +61,7 @@
       "typeVersion": 2,
       "position": [
         672,
-        -48
+        176
       ],
       "id": "1b009bfa-7567-484d-9e72-40b666f68cdf",
       "name": "Collect Links"
@@ -78,7 +78,7 @@
       "typeVersion": 2.7,
       "position": [
         896,
-        -48
+        176
       ],
       "id": "64606454-bec8-47c1-b31b-7fcfc99b2ced",
       "name": "Check Seen Links",
@@ -98,7 +98,7 @@
       "typeVersion": 2,
       "position": [
         1120,
-        -48
+        176
       ],
       "id": "52df772d-1178-4795-9e71-c857a9478d47",
       "name": "Filter New Items",
@@ -116,7 +116,7 @@
       "typeVersion": 2.7,
       "position": [
         1344,
-        -48
+        176
       ],
       "id": "22624630-210d-442e-9e2e-2e139eaf8e32",
       "name": "Insert New Links",
@@ -156,7 +156,7 @@
       "typeVersion": 2.3,
       "position": [
         448,
-        48
+        272
       ],
       "id": "2f58021f-9416-41f7-ad2b-e3eda08c63e7",
       "name": "Validate Normalization"
@@ -168,7 +168,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1552,
+        0,
         -48
       ],
       "id": "f78164e1-4ac4-4e57-836c-d51fd275b984",
@@ -182,7 +182,7 @@
       "typeVersion": 2,
       "position": [
         1568,
-        -48
+        176
       ],
       "id": "n03-returnnew",
       "name": "Return New Articles"
@@ -282,9 +282,11 @@
   },
   "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
   },
-  "versionId": "05321f83-1762-40f6-a9ab-999b002986be",
+  "versionId": "757bd8b7-74cd-4695-9fb6-abd253e0f0b9",
   "meta": {
     "templateCredsSetupCompleted": true
   },
