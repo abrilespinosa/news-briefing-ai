@@ -8,7 +8,7 @@
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.2,
       "position": [
-        0,
+        -224,
         160
       ],
       "id": "n05-trigger",
@@ -37,7 +37,7 @@
       "typeVersion": 1.3,
       "position": [
         224,
-        160
+        288
       ],
       "id": "n05-call04",
       "name": "Call '04-clustering'"
@@ -149,20 +149,6 @@
       ],
       "id": "n05-skipsingle",
       "name": "Single Source - Skipped for Now"
-    },
-    {
-      "parameters": {
-        "maxItems": 2
-      },
-      "type": "n8n-nodes-base.limit",
-      "typeVersion": 1,
-      "position": [
-        2240,
-        -32
-      ],
-      "id": "n05-devlimit",
-      "name": "⚠️ DEV ONLY - Limit to 2 Clusters",
-      "disabled": true
     },
     {
       "parameters": {
@@ -379,12 +365,13 @@
           "attemptToConvertTypes": false,
           "convertFieldsToString": true
         },
-        "options": {}
+        "options": {},
+        "mode": "once"
       },
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        3584,
+        3808,
         -128
       ],
       "id": "n05-callself",
@@ -408,12 +395,59 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        3360,
+        3584,
         -128
       ],
       "id": "n05-wait",
       "name": "Wait 20s Before Next Batch",
       "webhookId": "n05-wait-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "reuse1",
+              "leftValue": "={{ $json.cluster_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        160
+      ],
+      "id": "reuse-queue-if",
+      "name": "Reusing Queue from Previous Run?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pasa a la siguiente ejecución los clusters que quedan por analizar.\n//\n// Sin esto cada auto-llamada arrancaba invocando a 04, que arrastra a 03, 02 y\n// 01: 27 ingestas RSS completas (216 peticiones a los medios) y 27 self-joins de\n// similitud para analizar 30 noticias. La cola se recalculaba entera cada vez\n// solo para coger el siguiente elemento.\n//\n// Congelar la cola al inicio del drenado es deliberado, no un efecto colateral:\n// reagrupar a mitad de corrida ya producía listas distintas entre ejecuciones\n// (998 clusters en una, 1.000 en la siguiente). Los artículos que lleguen\n// durante el drenado entran en la corrida del día siguiente, que es el contrato\n// de un briefing diario.\n//\n// \"Get Already-Analyzed Links\" se sigue consultando en cada ejecución: es el\n// respaldo de corrección si algo analizara por fuera de esta cadena.\nconst yaProcesado = $('Limit Batch Size (1/run)').first().json.cluster_id;\n\nreturn $('Filter Unanalyzed Clusters').all()\n  .filter(item => item.json.cluster_id !== yaProcesado);\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        -128
+      ],
+      "id": "pass-remaining-queue",
+      "name": "Pass Remaining Queue Forward"
     }
   ],
   "pinData": {},
@@ -422,7 +456,7 @@
       "main": [
         [
           {
-            "node": "Call '04-clustering'",
+            "node": "Reusing Queue from Previous Run?",
             "type": "main",
             "index": 0
           }
@@ -444,7 +478,7 @@
       "main": [
         [
           {
-            "node": "⚠️ DEV ONLY - Limit to 2 Clusters",
+            "node": "Call Groq for Analysis",
             "type": "main",
             "index": 0
           }
@@ -463,17 +497,6 @@
         [
           {
             "node": "Single Source - Skipped for Now",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "⚠️ DEV ONLY - Limit to 2 Clusters": {
-      "main": [
-        [
-          {
-            "node": "Call Groq for Analysis",
             "type": "main",
             "index": 0
           }
@@ -597,7 +620,7 @@
       "main": [
         [
           {
-            "node": "Wait 20s Before Next Batch",
+            "node": "Pass Remaining Queue Forward",
             "type": "main",
             "index": 0
           }
@@ -632,6 +655,35 @@
           }
         ]
       ]
+    },
+    "Reusing Queue from Previous Run?": {
+      "main": [
+        [
+          {
+            "node": "Filter Multi-Source Clusters",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call '04-clustering'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Remaining Queue Forward": {
+      "main": [
+        [
+          {
+            "node": "Wait 20s Before Next Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -639,7 +691,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "e0b626fe-ed65-4215-941e-6a0e732261b4",
+  "versionId": "d46a95e8-523a-4a26-bbd5-39760315f312",
   "meta": null,
   "nodeGroups": [],
   "id": "EpfAWRMrKttE97F1",
