@@ -45,8 +45,24 @@ Esto trata el síntoma. El arreglo de fondo es que 05 distinga precisión de con
 - **Dentro de cada tema, de más fuentes a menos.** El número de medios que cubren un suceso es la única señal de relevancia fiable que existe en los datos: `published_date` no está en el análisis y la categoría del RSS es `portada` en el 85% de los casos.
 - **Titular neutro**: se usa el `que_paso` que escribió 05, no el titular del medio. Los titulares de prensa vienen editorializados ("vuelve a dispararse", "en una victoria clave") y el proyecto rechaza el lenguaje periodístico.
 - **La caja de cada medio es el enlace a su artículo.** Una sola fila: pintar los nombres de los medios y debajo otra vez los mismos nombres como enlaces era información repetida.
-- **Las divergencias se componen como tabla de conciliación**, medio → cifra en monoespaciada con `tabular-nums`. Ver `ABC 350.000` y `elDiario.es 348.000` alineados uno debajo del otro hace el desacuerdo literalmente legible.
-- **Tema visual**: el ocre está reservado en exclusiva a las contradicciones numéricas. Si aparece cinco veces en todo el documento, significa algo. La página se adapta a tema claro y oscuro.
+- **Las divergencias se componen como tabla de conciliación**, medio → cifra con `tabular-nums`. Ver `ABC 350.000` y `elDiario.es 348.000` alineados uno debajo del otro hace el desacuerdo literalmente legible.
+- **La fecha es el titular.** Es lo único que cambia de verdad cada día, así que es lo único que ocupa el sitio de máxima jerarquía. Una tesis fija ahí ("dónde coinciden los medios y dónde no") se gasta al leerla treinta mañanas seguidas; el nombre del sistema queda reducido a marca pequeña encima.
+
+### Diseño: dos tonos, y uno de ellos significa una sola cosa
+
+El **índigo** es la estructura —banda de cabecera, rótulos de tema, índice, enlaces— y el **bronce** aparece en un único sitio de todo el documento: donde las fuentes se contradicen en una cifra. Que el color más saturado señale siempre lo mismo es lo que hace que el documento se lea como *aquí hay contraste* y no como *aquí hay opinión*.
+
+De ahí salen dos descartes deliberados. El **rojo, el magenta y el naranja saturado** quedan fuera por ser el código cromático de la alarma y del sensacionalismo, que diría justo lo contrario de lo que el proyecto quiere. Y quedan fuera los **colores por medio**: asignarle un tono fijo a cada cabecera rozaba el principio de no etiquetarlas, así que todos los enlaces son cajas idénticas y el pie lo dice explícitamente.
+
+Una versión intermedia usó un solo tono sobre gris y resultó apagada. El diagnóstico no fue el tono sino la **superficie**: el color aparecía únicamente en dos bordes de 2 px. La solución fue darle área —banda de cabecera, caja de divergencia rellena, filete de tema— y añadir un segundo tono cálido, porque un documento monocromo se lee siempre más plano de lo que es.
+
+### Tipografía: el briefing tiene que abrirse en cualquier sitio
+
+El diseño original pedía `Iowan Old Style`, que **solo existe en Apple**. En Android caía en lo que hubiera y el ritmo tipográfico entero se descolocaba — algo que no se nota mientras solo lo abres en tus propios dispositivos, y que con un bot multiusuario pasaría a ser el aspecto por defecto de la mayoría.
+
+La pila nombra explícitamente la fuente de cada sistema en vez de confiar en el genérico: Android resuelve a **Roboto / Roboto Mono**, Apple a **San Francisco / SF Mono**, Windows a **Segoe UI / Consolas**. Sin serifas en todo el documento.
+
+Sigue sin ser idéntico en los tres. Lo idéntico exigiría empotrar una familia de licencia libre como `data:` URI —unos 30–60 KB por variante sobre los ~55 KB actuales, asumible para un adjunto— y está pendiente de decidir. De ahí una consecuencia de diseño que conviene respetar en el futuro: **mientras la letra no esté garantizada, el diseño no debe apoyar su identidad en ella.**
 
 ### "Ver más" y el campo `desarrollo`
 
@@ -91,6 +107,7 @@ Ejecución real sobre los datos del 6 de agosto de 2026:
 
 - 25 análisis seleccionados (no 50: el filtro por día natural descartó correctamente los del día 4), 8 categorías, 5 divergencias numéricas.
 - Documento de 57.427 bytes bien formado — abre en `<!doctype html>`, cierra en `</html>`, con 25 `<article>` y 25 `<details>` balanceados y 67 enlaces a fuentes. `payload` de 61 KB, JSON válido.
+- **Rediseño validado igual, sobre los 30 análisis del 7 de agosto**: 54.728 bytes, 30 `<article>`, 27 `<details>`, etiquetas balanceadas y cero recursos externos (ni hojas de estilo, ni fuentes remotas, ni imágenes, ni JavaScript) — condición indispensable para que 09 lo mande como adjunto y se lea con la máquina apagada.
 - Tiempo del Code node: **14 ms**.
 - Idempotencia comprobada en una transacción revertida: al simular una segunda ejecución del mismo día, la tabla mantiene una sola fila con el contenido reemplazado.
 
@@ -103,3 +120,5 @@ El renderizador se desarrolló primero en Python como prototipo visual y despué
 - **El reparto por categorías está escorado**: el 7 de agosto, `espana` reunió 14 de 30 noticias. Es esperable con ocho medios españoles, pero si se mantiene habrá que revisar si ordenar el índice por volumen tiene sentido cuando una categoría es la mitad del documento.
 - **La sección secundaria de 06 no está integrada.** 06 está pausado; cuando se reanude, sus piezas de fuente única entran como segunda sección bajo la misma taxonomía. El `payload` ya está estructurado para admitirlo sin cambiar el esquema.
 - El orden de categorías por volumen hace que el briefing cambie de estructura cada día. Un orden editorial fijo sería más predecible para lectura diaria.
+- **Empotrar la tipografía como `data:` URI** para que el documento se vea igual en Android, Apple y Windows. Requiere una familia de licencia libre (Roboto es Apache 2.0), subconjuntada a los caracteres del español, versionada en el repositorio junto a su aviso de licencia. Es lo que cierra del todo el objetivo de que el briefing lo pueda abrir cualquiera.
+- **Al documento le falta identidad propia.** Se probaron dos retículas con una idea estructural detrás —una línea vertical que solo rompen las contradicciones, y un margen fijo para lo que anota la máquina frente a la columna de lo que dicen las fuentes— y ninguna convenció. Queda como problema abierto y consciente: hoy el diseño es correcto y sobrio, pero no tiene una forma que sea solo suya. Cuando el proyecto tenga nombre, ese será el momento natural de retomarlo.

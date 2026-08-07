@@ -92,7 +92,8 @@ El orquestador (fase 00) dispara a diario `05`, después `07`, `08` y `09`; las 
       │
       ▼
 08 · Briefing Builder ── ensamblaje determinista (sin LLM): índice por temas, orden por nº de medios,
-                       tabla de conciliación de cifras discrepantes; HTML autocontenido en Postgres
+                       tabla de conciliación de cifras discrepantes; HTML autocontenido en Postgres,
+                       con la fecha como titular y el bronce reservado a las contradicciones numéricas
       │
       ▼
 09 · Entrega ──── Telegram: aviso + el HTML como adjunto (se lee con el equipo apagado, a diferencia
@@ -237,6 +238,8 @@ Cosas implementadas y documentadas cuyo comportamiento **todavía no se ha obser
 Decisiones ya tomadas para fases futuras, pendientes de implementar:
 
 - **Identidad persistente de eventos**: hoy el clustering compara artículos dentro de una ventana de 24h; un evento en desarrollo durante varios días (ej. cobertura de un incendio) no se vincula todavía con artículos de días anteriores.
+- **Empotrar la tipografía como `data:` URI**: el briefing nombra la fuente de cada sistema (Roboto en Android, San Francisco en Apple, Segoe UI en Windows) porque `Iowan Old Style` solo existe en Apple y en Android caía en cualquier cosa. Se sostiene en los tres, pero no es idéntico. Empotrar una familia de licencia libre subconjuntada al español lo cerraría del todo — unos 30–60 KB sobre los ~55 KB actuales — y es el paso que hace falta si el bot pasa a ser multiusuario.
+- **Al briefing le falta identidad visual propia.** Se probaron dos retículas con una idea estructural detrás y ninguna convenció; queda anotado como problema abierto en [`docs/08-briefing-builder.md`](docs/08-briefing-builder.md). El momento natural de retomarlo es cuando el proyecto tenga nombre.
 - **Canal web para la entrega**: el adjunto de Telegram se eligió porque el equipo que aloja el pipeline se suspende y cualquier enlace estaría caído al abrir la notificación. Si el pipeline deja de vivir en un portátil, servir el HTML tiene ventajas (navegación, historial). El `payload` de 08 está guardado precisamente para poder renderizar a otro formato sin reanalizar.
 - **Presupuesto de Groq como techo del proyecto**: medido, una llamada de 05 consume ~3.000 tokens sobre los 100.000/día del nivel gratuito, o sea ~33 acontecimientos diarios. El 7 de agosto había 53 clusters multi-fuente y 35 sin analizar. **El límite ya está por debajo del volumen que generan 8 fuentes**, y añadir más lo agrava. Las palancas son recortar el prompt (el 75% del gasto es entrada) a costa de calidad, o pasar al nivel de pago. Además el tope no aplaza trabajo, lo descarta: 04 agrupa en una ventana de 24h.
 - **Extracción de contenido completo** (Mozilla Readability o `trafilatura`, en un contenedor aparte): hoy 05 analiza el teaser del RSS, no el artículo. El Mundo entrega 174 caracteres de media frente a los 6.236 de elDiario.es, y 6 de cada 25 clusters se quedan sin material suficiente para un cuerpo de noticia. **Implica revisar el principio "solo RSS, sin scraping"**, así que es una decisión de filosofía del proyecto y no solo técnica.
