@@ -85,3 +85,21 @@ CREATE TABLE IF NOT EXISTS secondary_briefing_items (
     processed_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_secondary_briefing_items_link ON secondary_briefing_items(link);
+
+-- Briefing diario ya ensamblado (fase 08).
+-- Se guarda el documento renderizado Y la selección estructurada que lo originó:
+-- con solo el HTML, cambiar el maquetado obligaría a reanalizar; con el payload
+-- se puede re-renderizar a cualquier formato (o a otro canal en la fase 09) años
+-- después sin gastar un token.
+-- briefing_date es UNIQUE a propósito: regenerar el briefing de un mismo día
+-- reemplaza el anterior en vez de duplicarlo, así que 08 es idempotente y se
+-- puede reejecutar sin ensuciar el historial.
+CREATE TABLE IF NOT EXISTS briefings (
+    id SERIAL PRIMARY KEY,
+    briefing_date DATE NOT NULL UNIQUE,
+    cluster_count INTEGER NOT NULL,
+    divergence_count INTEGER NOT NULL,
+    payload JSONB NOT NULL,
+    content_html TEXT NOT NULL,
+    generated_at TIMESTAMPTZ DEFAULT now()
+);
