@@ -115,6 +115,8 @@ ON CONFLICT (link) DO NOTHING;
 
 El `ON CONFLICT DO NOTHING` da idempotencia: reejecutar el workflow sobre los mismos datos no falla ni duplica.
 
+**Esta escritura ocurre antes de que 04 genere los embeddings**, y ahí hay un acoplamiento que conviene tener presente: marcar un link como visto es un compromiso de que el artículo ha entrado en el pipeline, pero quien lo mete de verdad en `normalized_articles` es la fase siguiente. Si el embedding falla, el artículo queda visto y sin persistir, y 03 no volverá a considerarlo nunca. Se resuelve en 04, que devuelve esos links a la cola borrándolos de aquí (ver `docs/04-clustering.md`). La alternativa —insertar en `seen_articles` solo tras un embedding correcto— mezclaría en 04 una responsabilidad que es de 03.
+
 ### Return New Articles (Code, Run Once for All Items)
 
 ```javascript
@@ -148,4 +150,5 @@ return $('Filter New Items').all();
 ## Mejora futura
 
 - Deduplicación semántica (mismo hecho, distinta fuente/URL) — corresponde a la fase 04 (clustering), no a esta.
-- La jerarquía `CATEGORY_PRIORITY` está hardcodeada en el Code node; migrar a configuración externa (Postgres) cuando se añadan más fuentes con categorías no cubiertas por la lista actual.
+- La jerarquía `CATEGORY_PRIORITY` está hardcodeada en el Code node; migrar a configuración externa (Postgres) cuando se añadan más fuentes con categorías no cubiertas por la lista actual. La tabla `app_config` que introdujo la fase 09 es el sitio natural.
+- **`seen_articles` no se poda.** Es correcto —olvidar un link significa reprocesarlo— pero crece indefinidamente. Con ~700 filas/día es despreciable durante años; conviene saber que el crecimiento es por diseño y no un descuido.

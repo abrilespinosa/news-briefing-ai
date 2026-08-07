@@ -26,6 +26,16 @@ Anthropic no ofrece modelos de embeddings propios. En vez de depender de una API
 
 El clustering no depende de la corrida puntual de deduplicación: los artículos normalizados con su embedding se persisten en `normalized_articles`, y el clustering los recupera por ventana temporal (últimas 24h). Esto separa dos preguntas distintas — "¿ya vi este link?" (`seen_articles`) y "¿qué artículos comparo en esta ejecución de clustering?" (`normalized_articles` + ventana) — y permite que el clustering se ejecute independientemente de si hubo ingesta nueva en esa corrida.
 
+### Un embedding fallido no puede perder el artículo
+
+Esa separación tiene una arista peligrosa: **03 inserta los links en `seen_articles` antes de que 04 los embeba.** Si Ollama falla, el artículo queda marcado como visto sin haber llegado nunca a `normalized_articles`, y 03 no lo volverá a considerar en ninguna corrida futura. No es un fallo ruidoso que se pueda reintentar: es una pérdida permanente y silenciosa.
+
+Y el alcance no es un artículo suelto. `Generate Embeddings` manda **todos los textos en una única petición** a Ollama, así que es todo o nada: un fallo se lleva la ingesta entera de esa corrida.
+
+El nodo `Requeue Articles With Failed Embedding` los borra de `seen_articles`, con lo que el fallo pasa a ser autorreparable — la corrida siguiente los vuelve a ingerir. Cubre las dos vías por las que puede llegar el problema: el error HTTP del nodo de embeddings y el `throw` por desajuste entre embeddings recibidos y artículos enviados, que antes tiraba el workflow dejando exactamente la misma basura.
+
+**Tras reencolarlos, la corrida continúa hacia el clustering en vez de morir.** Agrupa lo que ya hay en la ventana de 24h, de modo que un fallo de embeddings degrada el briefing del día pero no lo cancela. Los reintentos del nodo son 3 con 10s entre medias, margen suficiente para el arranque en frío de Ollama cargando el modelo.
+
 ### Algoritmo: similitud coseno en Postgres (`pgvector`) + Union-Find en n8n
 
 La comparación por pares (similitud coseno entre embeddings) se ejecuta en Postgres vía la extensión `pgvector` (operador `<=>`, distancia coseno), no en el Code node. Solo la fusión de pares en clusters (Union-Find / Disjoint Set Union) se hace en JavaScript puro dentro de n8n, ya que esa parte es barata (O(aristas), no O(n²)).
@@ -135,5 +145,7 @@ Sobre 284 artículos reales (4 fuentes, mismo día): 276 clusters, 7 de ellos mu
 ## Mejora futura
 
 - **Identidad persistente de eventos entre ejecuciones no consecutivas**: hoy el clustering solo compara artículos dentro de la ventana de 24h. Un evento en desarrollo durante varios días (ej. cobertura de un incendio) no se vincula automáticamente con artículos de días anteriores. Pendiente de diseño hasta definir cómo la fase 06 consumirá "eventos que se actualizan".
-- Añadir índice `ivfflat`/`hnsw` sobre `embedding` si el volumen de artículos crece lo suficiente para que el self-join deje de ser trivial.
+- Añadir índice `ivfflat`/`hnsw` sobre `embedding` si el volumen de artículos crece lo suficiente para que el self-join deje de ser trivial. Hay ya un índice B-tree sobre `processed_at`, que es por donde filtra la ventana.
+- **El reencolado por fallo de embeddings no deja aviso.** La corrida sigue y termina en `success`, así que la degradación solo se ve entrando al historial de n8n. Ahora que existe la fase 09, el canal para notificarlo ya está montado.
+- **`normalized_articles` no se poda.** Crece ~700 filas/día con un vector de 1024 dimensiones cada una, y el clustering solo mira las últimas 24h. Habrá que decidir si el histórico se conserva (útil el día que exista identidad persistente de eventos) o se recorta.
 - Revisar el umbral de similitud con una muestra de varios días acumulados.

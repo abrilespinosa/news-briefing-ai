@@ -47,7 +47,12 @@ Un cluster lento o fallido no debe tumbar el resto del lote:
 - **`Get Already-Analyzed Links`**: los links que ya tienen un análisis `status='ok'` en las últimas 48h.
 - **`Filter Unanalyzed Clusters`**: descarta un cluster solo si *todos* sus artículos ya están cubiertos por un análisis previo exitoso — si se suma una fuente nueva a un evento ya analizado, se reprocesa entero (se acepta algo de trabajo redundante a cambio de simplicidad).
 - **1 cluster por ejecución**: ninguna ejecución queda a merced de cuántos clusters haya ese día.
-- **Auto-encadenado con espera**: al terminar un cluster, el workflow comprueba si queda más por analizar; si es así, espera 20s (calibrado bajo el límite de 12.000 tokens/minuto de este modelo) y se llama a sí mismo para el siguiente — un solo disparo (manual o, en el futuro, programado) drena toda la cola disponible hasta vaciarla o alcanzar el tope diario. La espera entre ejecuciones recursivas es necesaria porque el espaciado interno de un nodo no frena el salto a la siguiente ejecución.
+- **Auto-encadenado con espera**: al terminar un cluster, el workflow comprueba si queda más por analizar; si es así, espera 20s (calibrado bajo el límite de 12.000 tokens/minuto de este modelo) y se llama a sí mismo para el siguiente — un solo disparo drena toda la cola disponible hasta vaciarla o alcanzar el tope diario. La espera entre ejecuciones recursivas es necesaria porque el espaciado interno de un nodo no frena el salto a la siguiente ejecución.
+- **La cola viaja en la auto-llamada, no se recalcula.** La versión inicial invocaba a 04 al arrancar, siempre. Como cada auto-llamada es una ejecución nueva, eso reconstruía la cola entera para coger un único elemento: medido, **27 ingestas RSS completas (216 peticiones a los medios), 27 deduplicaciones y 27 self-joins de similitud para analizar 30 noticias**. Ahora el nodo `Pass Remaining Queue Forward` entrega los clusters restantes a la siguiente ejecución y un `IF` de entrada solo llama a 04 cuando no viene cola. El `Execute Workflow Trigger` ya estaba en modo `passthrough`, así que los items viajan intactos entre ejecuciones sin ninguna tabla intermedia.
+
+  **Congelar la cola al inicio del drenado es deliberado.** Reagrupar a mitad de corrida ya producía listas distintas entre ejecuciones consecutivas (998 clusters en una, 1.000 en la siguiente); trabajar sobre una foto fija es más predecible. Los artículos que lleguen durante los minutos del drenado entran en la corrida siguiente, que es el contrato de un briefing diario. `Get Already-Analyzed Links` se sigue consultando en cada vuelta como respaldo de corrección.
+
+  El nodo de auto-llamada fija `mode: once` explícitamente. Es el valor por defecto, pero con la cola en la entrada el modo `each` lanzaría **una sub-ejecución por cluster pendiente**, en cascada — no conviene depender de un valor por defecto para evitar eso.
 - **Tope diario de 30 análisis**, verificado en Postgres antes de gastar ninguna llamada, contando `status='ok'` y `status='superseded'` (esos tokens se gastaron) pero no `'error'`, para que un intento fallido y reintentable no consuma presupuesto del tope dos veces. La calibración está **medida, no estimada**: las respuestas de Groq traen su propio `usage`, y sobre clusters reales una llamada consume 2.558-3.307 tokens (~2.350 de prompt, ~640 de respuesta). Sobre los 100.000 tokens/día del nivel gratuito para este modelo son ~33 análisis de techo teórico; 30 deja margen para los clusters más grandes. El límite por minuto (12.000, leído de las cabeceras `x-ratelimit-limit-tokens`) no muerde: con un cluster por ejecución y 20s de espera se va al 60% de él.
 - **El tope no aplaza trabajo, lo descarta.** 04 agrupa en una ventana de 24h, así que un cluster que se quede fuera del tope solo se recupera si sus artículos siguen dentro de esa ventana en la corrida siguiente. El 7 de agosto había 35 clusters multi-fuente en cola y el techo del nivel gratuito está en ~33: **el límite de Groq ya está por debajo del volumen que generan 8 fuentes.**
 - **El corte del tope es el día natural UTC, no una ventana deslizante de 24h.** No es un detalle cosmético: con ventana deslizante el tope se vuelve **autobloqueante** en cuanto existe un trigger programado. Si el trabajo de un día se hace más tarde que la hora del cron —por ejemplo, análisis a las 09:22 con el `Schedule Trigger` a las 07:00—, la ventana de 24h todavía está llena cuando el cron dispara al día siguiente, la corrida se salta el análisis, y la situación se perpetúa indefinidamente. Se detectó en la primera corrida real del orquestador (ver `docs/00-orchestrator.md`), con 20 clusters pendientes bloqueados. El día natural UTC además coincide con el reset real del presupuesto diario de Groq, así que es el corte correcto por partida doble.
@@ -116,9 +121,20 @@ Quien sí lo sabe es 05, en el momento exacto de escribir. Por eso `Insert Clust
 
 Esto trata el síntoma en la capa correcta, no la causa raíz: la razón de fondo es que 04 no persiste identidad de evento entre ejecuciones (ver `docs/04-clustering.md`). Mientras eso siga así, seguirán generándose análisis que otro reemplaza.
 
-**El nodo emite cero filas siempre, no solo cuando no hay nada que retirar.** El CTE termina en un `UPDATE` sin `RETURNING`, así que el conjunto de resultados está vacío en toda inserción, incluidas las que sí retiran un duplicado. Es `alwaysOutputData` el único que mantiene vivo el auto-encadenado que cuelga justo detrás. Comprobado en producción: 30 inserciones consecutivas y 27 auto-llamadas sin que el bucle se cortara.
+**El nodo emite cero filas siempre, no solo cuando no hay nada que retirar.** El CTE termina en un `UPDATE` sin `RETURNING`, así que el conjunto de resultados está vacío en toda inserción, incluidas las que sí retiran un duplicado. Es `alwaysOutputData` el único que mantiene vivo el auto-encadenado que cuelga justo detrás.
 
-> **⚠️ La rama `UPDATE` sigue sin ejercitarse.** El SQL está validado contra datos de producción en una transacción revertida (retiró las dos filas correctas y ninguna otra), pero todavía no ha ocurrido en n8n un solapamiento que lo active. Hay una razón estructural, no un fallo: **con una corrida diaria y la ventana de 24h de 04, los clusters casi nunca cruzan ejecuciones.** La corrida del 7 de agosto a las 09:52 cubría artículos desde las 09:52 del día anterior, y los análisis del día 6 se hicieron a las 09:20-09:43 — sus artículos ya habían caído fuera. El duplicado que motivó este CTE apareció con varias corridas manuales el mismo día separadas por horas, que es cuando el escenario se da de verdad.
+**Verificado en producción el 7 de agosto**, en una segunda corrida del mismo día:
+
+| retirado | fuentes antes | vigente | fuentes ahora | suceso |
+|---|---|---|---|---|
+| 122 | 3 | 136 | **4** | Un juez de EE UU obliga a Meta a pagar 567 millones de dólares |
+| 111 | 4 | 135 | 4 | El Real Madrid ha fichado a Yan Diomande |
+
+El segundo caso prueba el desempate: con igual número de fuentes gana el análisis nuevo, por el `<=`.
+
+**Cuándo se da el escenario, y cuándo no.** Con una corrida diaria y la ventana de 24h de 04, los clusters casi nunca cruzan ejecuciones: los artículos de la corrida anterior ya han caído fuera de la ventana. Lo que lo activa es **ejecutar dos veces en pocas horas** — 04 reagrupa sobre una ventana que aún contiene los artículos ya analizados, llegan fuentes nuevas sobre sucesos ya cubiertos, y `Filter Unanalyzed Clusters` los readmite porque basta con que un link esté sin analizar.
+
+La consecuencia práctica para el briefing es que el recuento **no crece** al reanalizar: 32 análisis de los que 2 retiran a otros 2 dejan 30 vigentes. Son los mismos acontecimientos, dos de ellos comparados entre más medios.
 
 **Concisión sin sobre-resumir:** el prompt pide 1-3 frases directas por campo de texto, sin sacrificar información necesaria para entender el hecho — no es "acorta al máximo", es evitar relleno mientras se mantiene la sustancia. `desarrollo` es la única excepción (ver abajo).
 
@@ -168,6 +184,20 @@ Validado con datos reales en tres niveles:
 El 6 de agosto una corrida produjo **25 análisis y 43 fallos 429**. El 7 de agosto, **30 análisis y 0 fallos**. La diferencia no está en los límites de Groq sino en el código: la versión del día 6 mandaba **5 clusters por tanda y no tenía nodo `Wait`**. Cinco llamadas simultáneas a ~3.000 tokens agotan de golpe los 12.000 tokens/minuto del modelo.
 
 Con un cluster por ejecución y 20s de espera, la separación real medida entre auto-llamadas fue de 23-33 segundos (media 24) a lo largo de 27 iteraciones seguidas, sin un solo rechazo. Es la confirmación de que **el límite que muerde es tokens/minuto, no peticiones/minuto**: 1.000 peticiones/día no se rozan siquiera.
+
+### La cola en la auto-llamada, medida
+
+Corrida de prueba con el tope subido dos unidades, para ejercitar el bucle sin gastar presupuesto:
+
+| ejecución de 05 | entrada | rama tomada | ¿llama a 04? |
+|---|---|---|---|
+| 1ª | 1 item | construir | sí — 626 clusters |
+| 2ª | **11 items** | reutilizar | **no** |
+| 3ª | **10 items** | reutilizar | **no** |
+
+Tres ejecuciones de 05 con **una sola** de 01, 02, 03 y 04, frente a tres de cada una antes del cambio.
+
+El beneficio no es solo tiempo y cortesía con los servidores de los medios. n8n guarda el payload íntegro de cada nodo en `execution_data`, y las fases 01-04 pesan ~1,3 MB por ejecución: **1.058 MB de los 1.243 MB que ocupaba la tabla tras dos días** venían de esas rellamadas. Una corrida del orquestador escribía ~146 MB de historial.
 
 ### El techo de `desarrollo` nunca llega a ser vinculante
 
