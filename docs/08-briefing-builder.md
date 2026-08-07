@@ -56,6 +56,8 @@ Ese umbral no es cosmético. Cuando las fuentes son teasers escuetos, 05 devuelv
 
 Los análisis anteriores a la introducción de `desarrollo` no tienen el campo y simplemente no muestran desplegable.
 
+Medido sobre los 30 análisis del 7 de agosto: **3 se quedan por debajo del umbral** (5, 9 y 15 palabras), justo los tres cuyos clusters no llegaban a 1.500 caracteres de material. El umbral hace lo que debe.
+
 ### Almacenamiento: el documento y también la selección
 
 La tabla `briefings` guarda `content_html` **y** `payload` (JSONB con la selección ya clasificada).
@@ -94,6 +96,7 @@ El renderizador se desarrolló primero en Python como prototipo visual y despué
 ## Mejora futura
 
 - **Un briefing de 25 noticias sigue siendo largo.** Con varios días acumulados habrá que ver si conviene un tope por categoría o un criterio de corte, sabiendo que descartar análisis ya pagados al LLM tiene su propio coste.
-- **Vigilar la densidad de divergencias**: 5 en 25 noticias. Si la media diaria baja mucho más, el elemento diferencial del briefing apenas aparecerá y habrá que revisar si el problema es el filtro de 08 o la detección de 05.
+- **Vigilar la densidad de divergencias**: 5 en 25 noticias el 6 de agosto, **3 en 30 el día 7** — del 20% al 10%. Ese segundo día 05 declaró 30 discrepancias sobre 29 de los 30 clusters y el clasificador dejó pasar 3. Con dos días no hay tendencia, pero es la cifra a seguir: si el marcador de contradicción casi no aparece, el elemento diferencial del briefing se diluye, y habrá que decidir si el problema es el filtro de 08 o la detección de 05.
+- **El reparto por categorías está escorado**: el 7 de agosto, `espana` reunió 14 de 30 noticias. Es esperable con ocho medios españoles, pero si se mantiene habrá que revisar si ordenar el índice por volumen tiene sentido cuando una categoría es la mitad del documento.
 - **La sección secundaria de 06 no está integrada.** 06 está pausado; cuando se reanude, sus piezas de fuente única entran como segunda sección bajo la misma taxonomía. El `payload` ya está estructurado para admitirlo sin cambiar el esquema.
 - El orden de categorías por volumen hace que el briefing cambie de estructura cada día. Un orden editorial fijo sería más predecible para lectura diaria.
