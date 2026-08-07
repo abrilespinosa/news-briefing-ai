@@ -134,3 +134,37 @@ CREATE INDEX IF NOT EXISTS idx_cluster_analysis_analyzed_at
     ON cluster_analysis(analyzed_at);
 CREATE INDEX IF NOT EXISTS idx_cluster_analysis_status_categoria
     ON cluster_analysis(status, categoria);
+
+-- Estado diario del pipeline, reconstruido íntegramente a partir de las tablas
+-- que las fases ya escriben: ni un nodo de logging, ni una columna nueva.
+--
+-- Antes de añadir instrumentación conviene ver cuánto sale gratis. Con los
+-- timestamps que ya existen se responde qué entró, cuánto sobrevivió a cada
+-- filtro y cuánto llegó al briefing. Lo único que NO se puede deducir de aquí
+-- son los fallos que se autorreparan sin dejar rastro (un feed RSS vacío, un
+-- 429 de Groq, un reencolado de embeddings) y el consumo de tokens.
+CREATE OR REPLACE VIEW v_daily_pipeline AS
+WITH dias AS (
+    SELECT DISTINCT (processed_at AT TIME ZONE 'UTC')::date AS dia
+    FROM normalized_articles
+)
+SELECT d.dia,
+  (SELECT count(*) FROM normalized_articles n
+     WHERE (n.processed_at AT TIME ZONE 'UTC')::date = d.dia)                          AS articulos,
+  (SELECT count(DISTINCT n.source_name) FROM normalized_articles n
+     WHERE (n.processed_at AT TIME ZONE 'UTC')::date = d.dia)                          AS fuentes,
+  (SELECT count(*) FROM cluster_analysis c
+     WHERE (c.analyzed_at AT TIME ZONE 'UTC')::date = d.dia AND c.status = 'ok')       AS analisis_ok,
+  (SELECT count(*) FROM cluster_analysis c
+     WHERE (c.analyzed_at AT TIME ZONE 'UTC')::date = d.dia AND c.status = 'superseded') AS superseded,
+  (SELECT count(*) FROM cluster_analysis c
+     WHERE (c.analyzed_at AT TIME ZONE 'UTC')::date = d.dia AND c.status = 'error')    AS analisis_error,
+  (SELECT count(*) FROM cluster_analysis c
+     WHERE (c.analyzed_at AT TIME ZONE 'UTC')::date = d.dia AND c.categoria IS NULL)   AS sin_categoria,
+  b.cluster_count    AS en_briefing,
+  b.divergence_count AS divergencias,
+  round(b.cluster_count * 100.0 / NULLIF((SELECT count(*) FROM normalized_articles n
+     WHERE (n.processed_at AT TIME ZONE 'UTC')::date = d.dia), 0), 1)                  AS pct_supervivencia
+FROM dias d
+LEFT JOIN briefings b ON b.briefing_date = d.dia
+ORDER BY d.dia DESC;

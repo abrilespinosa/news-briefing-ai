@@ -46,6 +46,21 @@ Una segunda corrida ese mismo día ejercitó la **retirada de análisis obsoleto
 
 ## Arquitectura
 
+### El embudo, medido
+
+Una ejecución real del 7 de agosto de 2026 con las ocho fuentes activas:
+
+```
+818 artículos en la ventana de 24h
+ →  714 acontecimientos          (04 agrupa; 667 de ellos los cubre un solo artículo)
+ →   43 multi-fuente             (los únicos que compara 05)
+ →   30 analizados               (tope del nivel gratuito de Groq)
+```
+
+El estrechamiento no lo produce ningún filtro de calidad, sino un hecho del material de partida: **la gran mayoría de las noticias las publica un solo medio**. De 818 artículos, solo 151 acaban compartiendo cluster con otro. Ese 6% que llega al briefing es exactamente el objetivo del proyecto — contrastar, no acumular.
+
+### Fases
+
 Cada fase es un sub-workflow de n8n independiente, invocado mediante `Execute Workflow Trigger`. Esta modularidad es deliberada: cada fase se puede testear, depurar y versionar de forma aislada, en vez de mantener un único canvas monolítico.
 
 El orquestador (fase 00) dispara a diario `05`, después `07`, `08` y `09`; las fases `01`–`04` se invocan en cascada desde `05`.
@@ -214,7 +229,7 @@ Cosas implementadas y documentadas cuyo comportamiento **todavía no se ha obser
 - **09 no reintenta.** Si Telegram falla, el briefing queda en la tabla y no se reenvía. Reejecutar `09-delivery` a mano lo resuelve y no cuesta ni un token, pero no es automático.
 - **Divergencia conocida entre 06 y 07**: la regla de desempate de `internacional` introducida en 07 no está replicada en 06, que sigue pausado. Hay que replicarla antes de reanudarlo o las dos secciones del briefing usarán criterios distintos para la misma etiqueta.
 - **Densidad de divergencias a la baja**: 5 de 25 noticias el 6 de agosto, 3 de 30 el 7. Con dos días no hay tendencia, pero es la cifra que hay que vigilar: si el marcador de contradicción casi no aparece, el elemento diferencial del briefing se diluye.
-- **El reencolado por fallo de embeddings no avisa**: la corrida sigue y termina en `success`, así que una ingesta perdida solo se ve entrando al historial de n8n.
+- **Las tres ramas de reencolado de 04 y la rama de error de 08 nunca se han disparado**: están cableadas y su camino feliz está comprobado en ejecución real, pero ni Ollama ni Postgres han fallado todavía, así que ni el `DELETE FROM seen_articles` ni `Briefing Not Stored` se han ejecutado nunca. Además el reencolado **no avisa**: la corrida sigue y termina en `success`, así que una ingesta perdida solo se ve entrando al historial de n8n.
 - **El límite diario de Groq nunca se ha observado.** El tope de 30 análisis se calibra contra los 100.000 tokens/día que Groq documenta para este modelo, pero las cabeceras de la API solo exponen el bucket por minuto: todos los 429 que hemos visto eran por minuto, ninguno por día. El margen es autoimpuesto contra una cifra que no hemos podido confirmar en la cuenta.
 
 ## Roadmap técnico

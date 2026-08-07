@@ -39,6 +39,15 @@ services:
       # antes de que n8n limpiara nada; medido, alcanzó 1,2 GB en dos días.
       # Se conserva historial suficiente para depurar una corrida (una diaria son
       # ~20 ejecuciones) sin que crezca sin límite.
+      #
+      # Ojo: la purga borra filas, pero Postgres no devuelve el espacio al sistema
+      # operativo — lo marca como reutilizable y el fichero sigue igual de grande.
+      # Medido tras activarla: 300 filas con 377 MB de datos reales ocupando
+      # 1.251 MB. Recuperarlo es manual y bloquea la tabla unos segundos:
+      #   docker exec <postgres> psql -U $POSTGRES_USER -d $POSTGRES_DB \
+      #     -c "VACUUM (FULL, ANALYZE) execution_data;"
+      # Hace falta una sola vez, al activar la purga; después el tope mantiene el
+      # tamaño estable y el autovacuum normal basta.
       EXECUTIONS_DATA_PRUNE: "true"
       EXECUTIONS_DATA_MAX_AGE: 168      # horas (7 días)
       EXECUTIONS_DATA_PRUNE_MAX_COUNT: 300
