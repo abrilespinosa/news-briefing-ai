@@ -34,9 +34,11 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 | 06 | Quality Filter | ✅ Implementado | [`docs/06-quality-filter.md`](docs/06-quality-filter.md) |
 | 07 | Categorización | ✅ Implementado | [`docs/07-categorization.md`](docs/07-categorization.md) |
 | 08 | Construcción del briefing | ✅ Implementado | [`docs/08-briefing-builder.md`](docs/08-briefing-builder.md) |
-| 09 | Entrega | ⏳ Roadmap | — |
+| 09 | Entrega | ✅ Implementado | [`docs/09-delivery.md`](docs/09-delivery.md) |
 
-**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica y agrupa noticias del mismo acontecimiento entre 8 fuentes, las analiza comparando cómo las cubre cada medio, las clasifica por tema y ensambla un briefing diario en HTML que destaca las cifras en las que los medios se contradicen. Lo que falta es entregarlo: hoy el documento se queda en la base de datos.**
+**El pipeline está completo de punta a punta.** Cada mañana ingiere, normaliza, deduplica y agrupa noticias del mismo acontecimiento entre 8 fuentes, las analiza comparando cómo las cubre cada medio, las clasifica por tema, ensambla un briefing en HTML que destaca las cifras en las que los medios se contradicen y lo entrega por Telegram.
+
+Corrida real del 7 de agosto de 2026: 1.000 clusters detectados, 53 multi-fuente, 30 analizados, briefing de 30 acontecimientos en 7 categorías entregado 11 minutos después de arrancar, sin un solo fallo.
 
 ---
 
@@ -44,10 +46,10 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 
 Cada fase es un sub-workflow de n8n independiente, invocado mediante `Execute Workflow Trigger`. Esta modularidad es deliberada: cada fase se puede testear, depurar y versionar de forma aislada, en vez de mantener un único canvas monolítico.
 
-El orquestador (fase 00) dispara a diario `05`, después `07` y finalmente `08`; las fases `01`–`04` se invocan en cascada desde `05`.
+El orquestador (fase 00) dispara a diario `05`, después `07`, `08` y `09`; las fases `01`–`04` se invocan en cascada desde `05`.
 
 ```
-00 · Orquestador ── Schedule Trigger diario (cron 0 7 * * *) → 05 → 07 → 08
+00 · Orquestador ── Schedule Trigger diario (cron 0 7 * * *) → 05 → 07 → 08 → 09
       │
       ▼
 01 · Ingesta ──── RSS multi-fuente (El País, elDiario.es, El Mundo, ABC, 20minutos, La Vanguardia, Europa Press, El Español)
@@ -76,7 +78,8 @@ El orquestador (fase 00) dispara a diario `05`, después `07` y finalmente `08`;
                        tabla de conciliación de cifras discrepantes; HTML autocontenido en Postgres
       │
       ▼
-09 · Entrega ⏳
+09 · Entrega ──── Telegram: aviso + el HTML como adjunto (se lee con el equipo apagado, a diferencia
+                  de un enlace servido por el propio n8n)
 ```
 
 ---
@@ -91,6 +94,7 @@ El orquestador (fase 00) dispara a diario `05`, después `07` y finalmente `08`;
 | Análisis LLM (05, multi-fuente) | Groq API (`llama-3.3-70b-versatile`), nivel gratuito | Modelo open-weight, coste $0 a este volumen; se probó Ollama local primero pero la CPU compartida del portátil no daba fiabilidad ni escalaba con más fuentes — ver [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md) |
 | Quality Filter (06, fuente única) | Groq API (`llama-3.1-8b-instant`), nivel gratuito | Mismo proveedor, modelo distinto: 500K tokens/día frente a 100K, necesario para el volumen de piezas de fuente única (cientos/día) — ver [`docs/06-quality-filter.md`](docs/06-quality-filter.md) |
 | Categorización (07, multi-fuente) | Groq API (`llama-3.1-8b-instant`), nivel gratuito | Fase aparte y no un campo más en el prompt de 05: así cubre también los análisis ya hechos y no consume el presupuesto escaso del modelo de 05 — ver [`docs/07-categorization.md`](docs/07-categorization.md) |
+| Entrega (09) | Bot de Telegram | El HTML viaja como adjunto, no como enlace: el equipo que aloja el pipeline se suspende, así que cualquier URL servida por el propio n8n estaría caída al abrir la notificación — ver [`docs/09-delivery.md`](docs/09-delivery.md) |
 | Infraestructura | Docker Compose | Entorno reproducible, sin dependencias manuales |
 | Fuentes de noticias | RSS | Gratuito, sin necesidad de scraping ni APIs de pago |
 | Secretos | `.env` / `.env.example` | Nunca se versionan credenciales |
@@ -104,6 +108,7 @@ El orquestador (fase 00) dispara a diario `05`, después `07` y finalmente `08`;
 - Docker y Docker Compose
 - Cuenta de n8n (se crea localmente al primer arranque)
 - Una API key gratuita de [Groq](https://console.groq.com) (motor del análisis LLM de la fase 05)
+- Un bot de Telegram creado con [@BotFather](https://t.me/BotFather) (canal de entrega de la fase 09)
 
 ### Pasos
 
@@ -123,15 +128,32 @@ Tras el primer arranque, descarga el modelo de embeddings dentro del contenedor 
 docker exec -it news-briefing-ai-ollama-1 ollama pull bge-m3
 ```
 
-En n8n, crea una credencial `Header Auth` llamada "Groq API" (`Authorization` / `Bearer <tu GROQ_API_KEY>`) — la usa el nodo "Call Groq for Analysis" de la fase 05. No se versiona en los workflows exportados, por eso hay que crearla a mano tras importar.
+Aplica el esquema de la base de datos, que no lo hace ningún workflow ni script:
+
+```bash
+docker exec -i news-briefing-ai-postgres-1 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < db/schema.sql
+```
+
+Registra el destinatario del briefing. **No va en `.env`**: n8n 2.x deniega el acceso a las variables de entorno desde las expresiones, y levantar ese bloqueo daría a cualquier workflow acceso a todas las variables del contenedor (el detalle, en [`docs/09-delivery.md`](docs/09-delivery.md)):
+
+```bash
+docker exec -it news-briefing-ai-postgres-1 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "INSERT INTO app_config (key, value) VALUES ('telegram_chat_id', '<tu chat id>')
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
+```
+
+En n8n hay que crear dos credenciales a mano — no se versionan en los workflows exportados, por eso hay que asignarlas tras importar:
+
+- **"Groq API"**, de tipo `Header Auth` (`Authorization` / `Bearer <tu GROQ_API_KEY>`), para los nodos de llamada a Groq de las fases 05, 06 y 07.
+- **Una credencial de tipo `Telegram`** con el token que devuelve @BotFather, para los tres nodos de envío de la fase 09.
 
 ### Importar los workflows
 
 Los workflows implementados están exportados en [`workflows/`](workflows/):
 
-1. En n8n, `⋮` → `Import from File` → importa **de abajo arriba**: `01-ingestion-rss.json`, `02-normalization.json`, `03-deduplication.json`, `04-clustering.json`, `05-llm-analysis.json`, `06-quality-filter.json`, `07-categorization.json`, `08-briefing-builder.json` y por último `00-orchestrator-main.json`
-2. Publica los nueve workflows (`Publish` en la esquina superior derecha del editor), **en ese mismo orden**. Publicar es obligatorio para el auto-encadenado de `05` y `06`, y n8n rechaza publicar un workflow que referencie sub-workflows sin publicar — por eso `00` va el último
-3. Asigna la credencial "Groq API" a los nodos "Call Groq for Analysis" (en `05-llm-analysis`), "Call Groq for Filtering" (en `06-quality-filter`) y "Call Groq for Categorization" (en `07-categorization`)
+1. En n8n, `⋮` → `Import from File` → importa **de abajo arriba**: `01-ingestion-rss.json`, `02-normalization.json`, `03-deduplication.json`, `04-clustering.json`, `05-llm-analysis.json`, `06-quality-filter.json`, `07-categorization.json`, `08-briefing-builder.json`, `09-delivery.json` y por último `00-orchestrator-main.json`
+2. Publica los diez workflows (`Publish` en la esquina superior derecha del editor), **en ese mismo orden**. Publicar es obligatorio para el auto-encadenado de `05` y `06`, y n8n rechaza publicar un workflow que referencie sub-workflows sin publicar — por eso `00` va el último
+3. Asigna la credencial "Groq API" a los nodos "Call Groq for Analysis" (en `05-llm-analysis`), "Call Groq for Filtering" (en `06-quality-filter`) y "Call Groq for Categorization" (en `07-categorization`), y la credencial de Telegram a "Send Header", "Send Briefing Document" y "Send Sign-off" (en `09-delivery`)
 
 Las fases `01`–`06` invocan a la anterior internamente (`Execute Workflow`), así que no hace falta ejecutarlas por separado: ejecuta `05-llm-analysis` para el briefing principal (clusters multi-fuente) o `06-quality-filter` para el secundario (fuente única) — ambos disparan `01`→`04` internamente.
 
@@ -163,7 +185,9 @@ news-briefing-ai/
 │   ├── 04-clustering.md
 │   ├── 05-llm-analysis.md
 │   ├── 06-quality-filter.md
-│   └── 07-categorization.md
+│   ├── 07-categorization.md
+│   ├── 08-briefing-builder.md
+│   └── 09-delivery.md
 └── workflows/
     ├── 00-orchestrator-main.json
     ├── 01-ingestion-rss.json
@@ -173,7 +197,8 @@ news-briefing-ai/
     ├── 05-llm-analysis.json
     ├── 06-quality-filter.json
     ├── 07-categorization.json
-    └── 08-briefing-builder.json
+    ├── 08-briefing-builder.json
+    └── 09-delivery.json
 ```
 
 ---
@@ -182,19 +207,20 @@ news-briefing-ai/
 
 Cosas implementadas y documentadas cuyo comportamiento **todavía no se ha observado en una ejecución real**. Se listan aquí en vez de darlas por buenas:
 
-- **Retirada de análisis obsoletos en 05** (`status='superseded'`): el SQL está validado contra datos reales en una transacción revertida, pero el nodo no se ha ejecutado aún dentro de n8n — la primera corrida del orquestador topó el tope diario antes de llegar al `INSERT`. A vigilar: que `alwaysOutputData` evite cortar el auto-encadenado cuando el `UPDATE` no afecta a ninguna fila. Ver [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md).
+- **La rama `UPDATE` del `supersede` de 05 sigue sin ejercitarse.** El nodo sí se ha ejecutado ya 30 veces dentro de n8n sin cortar el auto-encadenado, que era el riesgo real: como el `UPDATE` no lleva `RETURNING`, la sentencia devuelve cero filas **en toda** inserción y solo `alwaysOutputData` mantiene vivo el bucle. Lo que no se ha dado es un solapamiento que active el `UPDATE`, y hay una razón de fondo: con una corrida diaria y una ventana de agrupación de 24h, los clusters casi nunca cruzan ejecuciones. El escenario que motivó el CTE (un evento reanalizado al sumársele una fuente) aparece sobre todo con varias corridas manuales el mismo día.
 - **Ruta de error de la llamada a 05 desde el orquestador**: cableada para que 07 corra igualmente, nunca ejercitada.
-- **Corrección del tope diario autobloqueante** (ventana deslizante → día natural UTC): aplicada, pendiente de confirmar con la primera corrida programada que sí analice.
+- **Rama `Nothing to Deliver` de 09**: requiere un día sin briefing, que solo ocurre si 05 y 07 no producen nada categorizado.
+- **09 no reintenta.** Si Telegram falla, el briefing queda en la tabla y no se reenvía. Reejecutar `09-delivery` a mano lo resuelve y no cuesta ni un token, pero no es automático.
 - **Divergencia conocida entre 06 y 07**: la regla de desempate de `internacional` introducida en 07 no está replicada en 06, que sigue pausado. Hay que replicarla antes de reanudarlo o las dos secciones del briefing usarán criterios distintos para la misma etiqueta.
-- **Campo `desarrollo` de 05 en producción**: validado con llamadas directas a Groq sobre clusters reales (rico y pobre), pero ningún análisis guardado lo tiene todavía — se añadió después de la última corrida. Hasta que 05 vuelva a analizar, el briefing no muestra el desplegable "Ver más".
-- **Techo proporcional de `desarrollo`**: los umbrales (1.500 y 4.000 caracteres) se calibraron con dos clusters, uno en cada extremo. Conviene revisarlos con una jornada entera antes de darlos por buenos.
+- **Densidad de divergencias a la baja**: 5 de 25 noticias el 6 de agosto, 3 de 30 el 7. Con dos días no hay tendencia, pero es la cifra que hay que vigilar: si el marcador de contradicción casi no aparece, el elemento diferencial del briefing se diluye.
 
 ## Roadmap técnico
 
 Decisiones ya tomadas para fases futuras, pendientes de implementar:
 
 - **Identidad persistente de eventos**: hoy el clustering compara artículos dentro de una ventana de 24h; un evento en desarrollo durante varios días (ej. cobertura de un incendio) no se vincula todavía con artículos de días anteriores.
-- **Fase 09 (Entrega)**: decidido el destino — n8n sirviendo el HTML por webhook, más un aviso a Telegram con el índice del día y el enlace. Telegram no admite tablas, así que el documento completo vive en la web y el mensaje es solo notificación.
+- **Canal web para la entrega**: el adjunto de Telegram se eligió porque el equipo que aloja el pipeline se suspende y cualquier enlace estaría caído al abrir la notificación. Si el pipeline deja de vivir en un portátil, servir el HTML tiene ventajas (navegación, historial). El `payload` de 08 está guardado precisamente para poder renderizar a otro formato sin reanalizar.
+- **Presupuesto de Groq como techo del proyecto**: medido, una llamada de 05 consume ~3.000 tokens sobre los 100.000/día del nivel gratuito, o sea ~33 acontecimientos diarios. El 7 de agosto había 53 clusters multi-fuente y 35 sin analizar. **El límite ya está por debajo del volumen que generan 8 fuentes**, y añadir más lo agrava. Las palancas son recortar el prompt (el 75% del gasto es entrada) a costa de calidad, o pasar al nivel de pago. Además el tope no aplaza trabajo, lo descarta: 04 agrupa en una ventana de 24h.
 - **Extracción de contenido completo** (Mozilla Readability o `trafilatura`, en un contenedor aparte): hoy 05 analiza el teaser del RSS, no el artículo. El Mundo entrega 174 caracteres de media frente a los 6.236 de elDiario.es, y 6 de cada 25 clusters se quedan sin material suficiente para un cuerpo de noticia. **Implica revisar el principio "solo RSS, sin scraping"**, así que es una decisión de filosofía del proyecto y no solo técnica.
 - **Distinguir en 05 discrepancia de precisión de contradicción factual**: hoy el 100% de los clusters reporta alguna discrepancia y solo el 20% son contradicciones reales. La fase 08 las separa con reglas deterministas, pero el arreglo de fondo es el prompt de 05.
 - **Agente de investigación sobre `preguntas_abiertas`**: 05 ya registra por cluster lo que ninguna fuente resuelve. Es el material de partida para un agente que busque esas respuestas.
