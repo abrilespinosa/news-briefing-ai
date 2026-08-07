@@ -163,19 +163,6 @@
     },
     {
       "parameters": {
-        "jsCode": "return $('Filter New Items').all();"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        0,
-        -48
-      ],
-      "id": "f78164e1-4ac4-4e57-836c-d51fd275b984",
-      "name": "Output Deduplicated Items"
-    },
-    {
-      "parameters": {
         "jsCode": "// 'Insert New Links' solo confirma la escritura ({success:true}), no devuelve\n// las filas insertadas (sin RETURNING). Sin este paso, quien llame a este\n// workflow (04-clustering) recibiría esa confirmación en vez de los artículos\n// nuevos reales, y pensaría que no hay nada que embeber.\nreturn $('Filter New Items').all();"
       },
       "type": "n8n-nodes-base.code",
@@ -286,7 +273,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "757bd8b7-74cd-4695-9fb6-abd253e0f0b9",
+  "versionId": "796342f8-8a05-42f5-8944-390596224787",
   "meta": {
     "templateCredsSetupCompleted": true
   },
