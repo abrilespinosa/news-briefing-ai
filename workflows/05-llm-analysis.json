@@ -251,7 +251,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- Cuenta 'superseded' además de 'ok': esos tokens se gastaron de verdad, y\n-- descontarlos del tope al retirar el análisis dejaría gastar por encima del\n-- presupuesto diario real de Groq.\n--\n-- El corte es el día natural UTC, no una ventana deslizante de 24h. Groq resetea\n-- su presupuesto diario a medianoche UTC, así que es el corte que corresponde.\n-- Con ventana deslizante el tope se volvía autobloqueante: si el trabajo de un\n-- día se hace más tarde que la hora del Schedule Trigger, la ventana todavía\n-- está llena cuando dispara el cron al día siguiente, y la corrida programada se\n-- salta el análisis indefinidamente.\nSELECT count(*) AS calls_today\nFROM cluster_analysis\nWHERE status IN ('ok', 'superseded')\n  AND analyzed_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';",
+        "query": "-- Cuenta 'superseded' además de 'ok': esos tokens se gastaron de verdad, y\n-- descontarlos del tope al retirar el análisis dejaría gastar por encima del\n-- presupuesto diario real de Groq.\n--\n-- El corte es el día natural UTC, no una ventana deslizante de 24h. Groq resetea\n-- su presupuesto diario a medianoche UTC, así que es el corte que corresponde.\n-- Con ventana deslizante el tope se volvía autobloqueante: si el trabajo de un\n-- día se hace más tarde que la hora del Schedule Trigger, la ventana todavía\n-- está llena cuando dispara el cron al día siguiente, y la corrida programada se\n-- salta el análisis indefinidamente.\n--\n-- Calibración del tope (medido, no estimado): una llamada consume ~3.000 tokens\n-- (~2.350 de prompt, ~640 de respuesta) sobre los 100.000/día del nivel gratuito\n-- de llama-3.3-70b-versatile, lo que da un techo teórico de ~33. Se fija en 30\n-- para dejar margen a los clusters más grandes. El límite por minuto (12.000) no\n-- muerde: con un cluster por ejecución y 20s de espera se va al 60% de él.\n--\n-- Este tope no aplaza trabajo, lo descarta: 04 agrupa en una ventana de 24h, así\n-- que un cluster que se quede fuera solo se recupera si sus artículos siguen\n-- dentro de la ventana en la corrida siguiente.\nSELECT count(*) AS calls_today\nFROM cluster_analysis\nWHERE status IN ('ok', 'superseded')\n  AND analyzed_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -284,7 +284,7 @@
             {
               "id": "capcheck1",
               "leftValue": "={{ Number($json.calls_today) }}",
-              "rightValue": 25,
+              "rightValue": 30,
               "operator": {
                 "type": "number",
                 "operation": "lt"
@@ -302,7 +302,7 @@
         64
       ],
       "id": "n05-capif",
-      "name": "Under Daily Cap? (<25)"
+      "name": "Under Daily Cap? (<30)"
     },
     {
       "parameters": {
@@ -326,7 +326,7 @@
         160
       ],
       "id": "n05-capreached",
-      "name": "⛔ Daily Cap Reached (25) - Skipping Groq"
+      "name": "⛔ Daily Cap Reached (30) - Skipping Groq"
     },
     {
       "parameters": {
@@ -546,7 +546,7 @@
       "main": [
         [
           {
-            "node": "Under Daily Cap? (<25)",
+            "node": "Under Daily Cap? (<30)",
             "type": "main",
             "index": 0
           }
@@ -564,7 +564,7 @@
         ]
       ]
     },
-    "Under Daily Cap? (<25)": {
+    "Under Daily Cap? (<30)": {
       "main": [
         [
           {
@@ -575,7 +575,7 @@
         ],
         [
           {
-            "node": "⛔ Daily Cap Reached (25) - Skipping Groq",
+            "node": "⛔ Daily Cap Reached (30) - Skipping Groq",
             "type": "main",
             "index": 0
           }
@@ -639,7 +639,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "a57377d1-49b8-4ae3-92ba-1844b0caf53d",
+  "versionId": "e0b626fe-ed65-4215-941e-6a0e732261b4",
   "meta": null,
   "nodeGroups": [],
   "id": "EpfAWRMrKttE97F1",
