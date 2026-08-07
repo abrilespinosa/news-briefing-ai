@@ -116,10 +116,26 @@
           "id": "z9SLVuZpj5X17xUz",
           "name": "Postgres account"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        176
+      ],
+      "id": "c0813c74-store-failed",
+      "name": "Briefing Not Stored - Safe to Rerun",
+      "notes": "08 no consume tokens y es idempotente (briefing_date es UNIQUE con ON CONFLICT DO UPDATE): si el guardado falla, reejecutar la fase reconstruye el briefing entero desde cluster_analysis sin coste. Esta rama existe para que el fallo se vea, no para recuperarlo.",
+      "notesInFlow": true
     }
   ],
-  "pinData": {},
   "connections": {
     "When Executed by Another Workflow": {
       "main": [
@@ -171,15 +187,26 @@
           }
         ]
       ]
+    },
+    "Store Briefing": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Briefing Not Stored - Safe to Rerun",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "7a647c49-351b-49a2-96d9-b98cec543020",
+  "versionId": "bec5d782-e4e3-47ac-9244-9c278c857fda",
   "meta": null,
-  "nodeGroups": [],
   "id": "0dEHfviDPUxZ6WH9",
-  "tags": []
+  "tags": [],
+  "pinData": {}
 }

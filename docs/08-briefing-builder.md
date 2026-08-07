@@ -75,8 +75,11 @@ Execute Workflow Trigger
   → Anything to Brief Today? (IF: id existe)
       true  → Build Briefing Document (Code, runOnceForAllItems)
             → Store Briefing (Postgres, INSERT ... ON CONFLICT DO UPDATE ... RETURNING)
+                  error → Briefing Not Stored - Safe to Rerun (NoOp)
       false → Nothing to Brief Today (NoOp)
 ```
+
+La rama de error de `Store Briefing` existe **para que el fallo se vea, no para recuperarlo**. 08 no gasta tokens y es idempotente, así que un fallo de escritura no destruye trabajo: reejecutar la fase reconstruye el briefing entero desde `cluster_analysis` a coste cero. Lo que sí destruía era la señal — sin rama de error, un `INSERT` fallido tumbaba el orquestador y 09 no llegaba a ejecutarse, dejando el día sin briefing y sin más pista que el historial de n8n. Antes de la rama hay 3 reintentos con 5s, que cubren el caso realista (una desconexión momentánea de Postgres).
 
 Un único Code node contiene la clasificación de discrepancias, la agrupación, el orden y el renderizado completo, incluido el CSS. El HTML resultante es autocontenido: sin hojas de estilo externas, sin fuentes remotas, sin JavaScript. Se puede servir, enviar por correo o abrir desde un fichero sin depender de nada.
 
