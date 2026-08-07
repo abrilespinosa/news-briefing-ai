@@ -48,7 +48,8 @@ Un cluster lento o fallido no debe tumbar el resto del lote:
 - **`Filter Unanalyzed Clusters`**: descarta un cluster solo si *todos* sus artículos ya están cubiertos por un análisis previo exitoso — si se suma una fuente nueva a un evento ya analizado, se reprocesa entero (se acepta algo de trabajo redundante a cambio de simplicidad).
 - **1 cluster por ejecución**: ninguna ejecución queda a merced de cuántos clusters haya ese día.
 - **Auto-encadenado con espera**: al terminar un cluster, el workflow comprueba si queda más por analizar; si es así, espera 20s (calibrado bajo el límite de 12.000 tokens/minuto de este modelo) y se llama a sí mismo para el siguiente — un solo disparo (manual o, en el futuro, programado) drena toda la cola disponible hasta vaciarla o alcanzar el tope diario. La espera entre ejecuciones recursivas es necesaria porque el espaciado interno de un nodo no frena el salto a la siguiente ejecución.
-- **Tope diario de 25 análisis**, calibrado contra el límite real de Groq para este modelo (100.000 tokens/día ÷ ~3.000 tokens/análisis), verificado en Postgres antes de gastar ninguna llamada — y contando `status='ok'` y `status='superseded'` (esos tokens se gastaron), pero no `'error'`, para que un intento fallido y reintentable no consuma presupuesto del tope dos veces.
+- **Tope diario de 30 análisis**, verificado en Postgres antes de gastar ninguna llamada, contando `status='ok'` y `status='superseded'` (esos tokens se gastaron) pero no `'error'`, para que un intento fallido y reintentable no consuma presupuesto del tope dos veces. La calibración está **medida, no estimada**: las respuestas de Groq traen su propio `usage`, y sobre clusters reales una llamada consume 2.558-3.307 tokens (~2.350 de prompt, ~640 de respuesta). Sobre los 100.000 tokens/día del nivel gratuito para este modelo son ~33 análisis de techo teórico; 30 deja margen para los clusters más grandes. El límite por minuto (12.000, leído de las cabeceras `x-ratelimit-limit-tokens`) no muerde: con un cluster por ejecución y 20s de espera se va al 60% de él.
+- **El tope no aplaza trabajo, lo descarta.** 04 agrupa en una ventana de 24h, así que un cluster que se quede fuera del tope solo se recupera si sus artículos siguen dentro de esa ventana en la corrida siguiente. El 7 de agosto había 35 clusters multi-fuente en cola y el techo del nivel gratuito está en ~33: **el límite de Groq ya está por debajo del volumen que generan 8 fuentes.**
 - **El corte del tope es el día natural UTC, no una ventana deslizante de 24h.** No es un detalle cosmético: con ventana deslizante el tope se vuelve **autobloqueante** en cuanto existe un trigger programado. Si el trabajo de un día se hace más tarde que la hora del cron —por ejemplo, análisis a las 09:22 con el `Schedule Trigger` a las 07:00—, la ventana de 24h todavía está llena cuando el cron dispara al día siguiente, la corrida se salta el análisis, y la situación se perpetúa indefinidamente. Se detectó en la primera corrida real del orquestador (ver `docs/00-orchestrator.md`), con 20 clusters pendientes bloqueados. El día natural UTC además coincide con el reset real del presupuesto diario de Groq, así que es el corte correcto por partida doble.
 
 **Nota de n8n**: un workflow solo puede llamarse a sí mismo si está *publicado* (`active: true`) — llamar a otro workflow inactivo sí funciona, pero la auto-referencia no. Publicar exige además que toda la cadena de sub-workflows referenciados esté publicada también. Las seis fases del pipeline están publicadas por este motivo.
@@ -63,7 +64,7 @@ Execute Workflow Trigger
       true  → Get Already-Analyzed Links (Postgres, executeOnce)
             → Filter Unanalyzed Clusters
             → Count Groq Calls Today (Postgres, executeOnce)
-            → Under Daily Cap? (<25)
+            → Under Daily Cap? (<30)
                 true  → Restore Cluster List
                       → Limit Batch Size (1/run)
                       → Build Prompt per Cluster
@@ -115,7 +116,9 @@ Quien sí lo sabe es 05, en el momento exacto de escribir. Por eso `Insert Clust
 
 Esto trata el síntoma en la capa correcta, no la causa raíz: la razón de fondo es que 04 no persiste identidad de evento entre ejecuciones (ver `docs/04-clustering.md`). Mientras eso siga así, seguirán generándose análisis que otro reemplaza.
 
-> **⚠️ Pendiente de comprobación en ejecución real.** La sentencia SQL está validada contra datos de producción dentro de una transacción revertida (retiró las dos filas correctas y ninguna otra), y el arrastre de los duplicados ya existentes se aplicó correctamente. Lo que **no** se ha observado todavía es el nodo ejecutándose dentro de n8n: la primera corrida del orquestador topó el tope diario y 05 no llegó al `INSERT`. El punto concreto a vigilar es que `alwaysOutputData` cumpla su función cuando el `UPDATE` no afecta a ninguna fila —el caso normal, sin duplicado que retirar—, porque si el nodo emitiera 0 items cortaría el auto-encadenado que cuelga justo detrás.
+**El nodo emite cero filas siempre, no solo cuando no hay nada que retirar.** El CTE termina en un `UPDATE` sin `RETURNING`, así que el conjunto de resultados está vacío en toda inserción, incluidas las que sí retiran un duplicado. Es `alwaysOutputData` el único que mantiene vivo el auto-encadenado que cuelga justo detrás. Comprobado en producción: 30 inserciones consecutivas y 27 auto-llamadas sin que el bucle se cortara.
+
+> **⚠️ La rama `UPDATE` sigue sin ejercitarse.** El SQL está validado contra datos de producción en una transacción revertida (retiró las dos filas correctas y ninguna otra), pero todavía no ha ocurrido en n8n un solapamiento que lo active. Hay una razón estructural, no un fallo: **con una corrida diaria y la ventana de 24h de 04, los clusters casi nunca cruzan ejecuciones.** La corrida del 7 de agosto a las 09:52 cubría artículos desde las 09:52 del día anterior, y los análisis del día 6 se hicieron a las 09:20-09:43 — sus artículos ya habían caído fuera. El duplicado que motivó este CTE apareció con varias corridas manuales el mismo día separadas por horas, que es cuando el escenario se da de verdad.
 
 **Concisión sin sobre-resumir:** el prompt pide 1-3 frases directas por campo de texto, sin sacrificar información necesaria para entender el hecho — no es "acorta al máximo", es evitar relleno mientras se mantiene la sustancia. `desarrollo` es la única excepción (ver abajo).
 
@@ -160,9 +163,27 @@ Validado con datos reales en tres niveles:
 2. **Cola sin repetir trabajo**: dos ejecuciones consecutivas sobre la misma ventana — la primera analiza los clusters disponibles, la segunda detecta (por los links ya cubiertos) que la mayoría ya están hechos y solo procesa los pendientes.
 3. **Resiliencia end-to-end**: un fallo puntual de red o límite de tasa en un cluster no afecta al resto del lote ni bloquea el auto-encadenado.
 
+### El espaciado, medido contra su propio contraejemplo
+
+El 6 de agosto una corrida produjo **25 análisis y 43 fallos 429**. El 7 de agosto, **30 análisis y 0 fallos**. La diferencia no está en los límites de Groq sino en el código: la versión del día 6 mandaba **5 clusters por tanda y no tenía nodo `Wait`**. Cinco llamadas simultáneas a ~3.000 tokens agotan de golpe los 12.000 tokens/minuto del modelo.
+
+Con un cluster por ejecución y 20s de espera, la separación real medida entre auto-llamadas fue de 23-33 segundos (media 24) a lo largo de 27 iteraciones seguidas, sin un solo rechazo. Es la confirmación de que **el límite que muerde es tokens/minuto, no peticiones/minuto**: 1.000 peticiones/día no se rozan siquiera.
+
+### El techo de `desarrollo` nunca llega a ser vinculante
+
+Sobre los 30 análisis del 7 de agosto, agrupados por el tramo que les tocó:
+
+| Techo | Clusters | Palabras (mín/media/máx) | Lo rebasan | Uso medio del techo |
+|---|---|---|---|---|
+| 60 | 3 | 5 / 9 / 15 | 0 | 14% |
+| 130 | 12 | 26 / 37 / 48 | 0 | 28% |
+| 220 | 15 | 33 / 122 / 201 | 0 | 55% |
+
+**Ninguno lo rebasa y ninguno lo persigue.** Quitado el objetivo fijo, el modelo escribe lo que el material sostiene y el techo actúa como barandilla, no como meta — que era exactamente el objetivo del cambio. Los tres clusters del tramo bajo se quedan por debajo de las 25 palabras y por tanto no muestran desplegable "Ver más" en el briefing, que es el comportamiento correcto.
+
 ## Mejora futura
 
-- El tope diario real de Groq para este modelo (~33 análisis/día) puede quedarse corto según crezca el volumen de fuentes — hay margen en el nivel gratuito con otros modelos de mayor presupuesto diario (ver `docs/06-quality-filter.md`, que ya usa ese enfoque).
+- **El tope diario de Groq ya se queda corto**, no "puede quedarse": ~33 análisis de techo frente a los 35 clusters multi-fuente que generaron 8 fuentes el 7 de agosto, y añadir fuentes lo agrava. Las palancas, en orden de coste: recortar el prompt (el 75% del gasto es entrada, así que truncar más el contenido compra clusters a costa de calidad de análisis), o pasar al nivel de pago. Bajar a un modelo más barato se descarta: 05 es donde vive el diferencial del proyecto.
 - Extracción de contenido completo (Mozilla Readability) para que el recorte a 2.000 caracteres no penalice a las fuentes con teasers más cortos.
 - Distinguir "discrepancia de precisión" (una fuente da menos detalle) de "discrepancia factual real" (un dato directamente distinto) en el esquema — hoy ambas caen en `discrepancias`.
 - Revisar si el filtro `source_count >= 2` debe convertirse en un umbral configurable compartido con la fase 06.
