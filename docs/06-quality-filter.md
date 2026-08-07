@@ -50,7 +50,6 @@ Execute Workflow Trigger
                       → Chunk into Batches of 8
                       → Limit Batch Count (1/run)
                       → Build Prompt per Batch
-                      → ⚠️ DEV ONLY - Limit to 1 Batch (desactivado por defecto)
                       → Call Groq for Filtering (llama-3.1-8b-instant, retryOnFail, continueErrorOutput)
                           success → Parse & Validate Batch Response ─┐
                           error   → Handle Groq Call Failure ────────┤

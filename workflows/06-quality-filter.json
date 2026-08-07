@@ -255,18 +255,6 @@
       "name": "Build Prompt per Batch"
     },
     {
-      "parameters": {},
-      "type": "n8n-nodes-base.limit",
-      "typeVersion": 1,
-      "position": [
-        2688,
-        -208
-      ],
-      "id": "n06-devlimit",
-      "name": "⚠️ DEV ONLY - Limit to 1 Batch",
-      "disabled": true
-    },
-    {
       "parameters": {
         "method": "POST",
         "url": "https://api.groq.com/openai/v1/chat/completions",
@@ -442,7 +430,6 @@
       "webhookId": "n06-wait-webhook"
     }
   ],
-  "pinData": {},
   "connections": {
     "When Executed by Another Workflow": {
       "main": [
@@ -572,17 +559,6 @@
       "main": [
         [
           {
-            "node": "⚠️ DEV ONLY - Limit to 1 Batch",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "⚠️ DEV ONLY - Limit to 1 Batch": {
-      "main": [
-        [
-          {
             "node": "Call Groq for Filtering",
             "type": "main",
             "index": 0
@@ -682,13 +658,13 @@
       ]
     }
   },
-  "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
-  "versionId": "335fdfac-f96d-475c-af30-d8b2e2e32ab8",
+  "versionId": "54ae5a1e-acfd-4720-af02-64853b5cd02c",
   "meta": null,
-  "nodeGroups": [],
   "id": "grwVm39L3EybHeM3",
-  "tags": []
+  "tags": [],
+  "pinData": {}
 }
