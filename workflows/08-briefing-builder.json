@@ -1,0 +1,185 @@
+{
+  "name": "08-briefing-builder",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "n08-trigger",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Día natural UTC, no ventana deslizante de 24h: con un trigger a hora fija,\n-- una ventana deslizante deja las noticias del borde repetidas o perdidas según\n-- lo que tarde 05 (mismo problema que ya se corrigió en el tope diario de 05).\n-- Solo entran clusters ya categorizados: si 07 falló, esos análisis esperan al\n-- briefing siguiente en vez de salir sin tema.\nSELECT id, categoria, source_count, sources, articles, analysis\nFROM cluster_analysis\nWHERE status = 'ok'\n  AND categoria IS NOT NULL\n  AND analyzed_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'\nORDER BY categoria, source_count DESC, id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "n08-select",
+      "name": "Get Today's Analyses",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "hasrows08",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "n08-hasrows",
+      "name": "Anything to Brief Today?"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        672,
+        160
+      ],
+      "id": "n08-nothing",
+      "name": "Nothing to Brief Today"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------------\n// Núcleo de la fase 08. Ensamblaje determinista: ni una llamada a LLM.\n// Todo el juicio editorial ya lo hicieron 05 (qué dice cada fuente) y 07 (tema).\n// Aquí solo se selecciona, clasifica, ordena y renderiza.\n// ---------------------------------------------------------------------------\n\nconst CAT_LABEL = {\n  internacional: 'Internacional', economia: 'Economía', tecnologia: 'Tecnología',\n  ciencia: 'Ciencia', espana: 'España', cultura: 'Cultura',\n  deportes: 'Deportes', sociedad: 'Sociedad'\n};\n\n// 05 marca como \"discrepancia\" cualquier diferencia entre fuentes, y en los datos\n// reales eso es el 100% de los clusters: la mitad son matices de redacción y una\n// cuarta parte son simples ausencias de cobertura. Si el briefing las destacara\n// todas, el aviso dejaría de significar nada. Se separan aquí sin LLM.\nconst AUSENCIA = /no\\s+(se\\s+)?(menciona|especifica|indica|detalla|precisa|proporciona|aporta|ofrece|da)|sin\\s+(datos|detalles?|especificar|concretar)|no\\s+(hay|consta|figura|aparece)|no\\s+lo\\s+(menciona|especifica)/i;\nconst NUM = /\\d[\\d.,]*/g;\n\nfunction normalizar(s) {\n  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .replace(/\\s+/g, ' ').trim().toLowerCase();\n}\n\nfunction cifras(s) {\n  const m = String(s ?? '').match(NUM) || [];\n  return new Set(m.map(n => n.replace(/\\./g, '').replace(/,/g, '.').replace(/\\.$/, '')));\n}\n\nfunction clasificarDiscrepancia(d) {\n  const vals = Object.values((d && d.version_por_fuente) || {});\n  if (vals.length < 2) return 'incompleta';\n  if (vals.some(v => AUSENCIA.test(String(v)))) return 'cobertura';\n  const conjuntos = vals.map(cifras);\n  if (conjuntos.every(c => c.size > 0)) {\n    const firmas = new Set(conjuntos.map(c => [...c].sort().join('|')));\n    if (firmas.size > 1) return 'cifras';\n  }\n  if (new Set(vals.map(normalizar)).size === 1) return 'identica';\n  return 'matiz';\n}\n\nconst esc = s => String(s ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\n// Convierte la lista de hechos confirmados en una frase en prosa. El briefing\n// no debe leerse como un volcado de bullets.\nfunction enProsa(frases) {\n  const f = frases.map(x => String(x).replace(/[.\\s]+$/, '')).filter(Boolean);\n  if (!f.length) return '';\n  const t = f.length === 1 ? f[0] + '.' : f.slice(0, -1).join('; ') + ', y ' + f[f.length - 1] + '.';\n  return t.charAt(0).toUpperCase() + t.slice(1);\n}\n\nfunction construirBriefing(filas, fecha) {\n  const items = filas.map(r => {\n    const a = r.analysis || {};\n    const disc = (a.discrepancias || []).map(d => ({ tipo: clasificarDiscrepancia(d), d }));\n    return {\n      id: r.id,\n      categoria: r.categoria,\n      source_count: r.source_count,\n      sources: r.sources || [],\n      articles: r.articles || [],\n      analysis: a,\n      fuertes: disc.filter(x => x.tipo === 'cifras').map(x => x.d),\n      descartadas: disc.filter(x => x.tipo !== 'cifras').length\n    };\n  });\n\n  const porCat = {};\n  for (const it of items) (porCat[it.categoria] ||= []).push(it);\n  for (const c of Object.keys(porCat)) {\n    porCat[c].sort((x, y) => (y.source_count - x.source_count) || (y.fuertes.length - x.fuertes.length) || (x.id - y.id));\n  }\n  // Categorías por volumen: el tema con más cobertura del día abre el briefing.\n  const cats = Object.keys(porCat).sort((a, b) => porCat[b].length - porCat[a].length);\n\n  const nDiv = items.reduce((s, x) => s + x.fuertes.length, 0);\n  const nMedios = new Set(items.flatMap(x => x.sources)).size;\n  const nDesc = items.reduce((s, x) => s + x.descartadas, 0);\n\n  return { items, porCat, cats, nDiv, nMedios, nDesc, fecha };\n}\n\nconst CSS = `\n:root{\n  --paper:#EEF0F3; --raise:#F7F8FA; --ink:#171B21; --muted:#59616C;\n  --rule:#D5DAE1; --accent:#1F3A5F; --signal:#B4531A; --signal-bg:#F6E8DE;\n  --serif:\"Iowan Old Style\",Georgia,\"Times New Roman\",serif;\n  --sans:system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;\n  --mono:ui-monospace,SFMono-Regular,\"SF Mono\",Menlo,Consolas,monospace;\n}\n@media (prefers-color-scheme:dark){\n  :root{--paper:#11141A; --raise:#171B22; --ink:#E3E7EC; --muted:#98A1AD;\n        --rule:#242A33; --accent:#8DB2E0; --signal:#E29154; --signal-bg:#2A1D14;}\n}\n:root[data-theme=\"dark\"]{--paper:#11141A; --raise:#171B22; --ink:#E3E7EC; --muted:#98A1AD;\n  --rule:#242A33; --accent:#8DB2E0; --signal:#E29154; --signal-bg:#2A1D14;}\n:root[data-theme=\"light\"]{--paper:#EEF0F3; --raise:#F7F8FA; --ink:#171B21; --muted:#59616C;\n  --rule:#D5DAE1; --accent:#1F3A5F; --signal:#B4531A; --signal-bg:#F6E8DE;}\n*{box-sizing:border-box}\nbody{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);\n     font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}\n.wrap{max-width:1180px;margin:0 auto;padding:0 24px 96px}\nheader.top{padding:56px 0 28px;border-bottom:2px solid var(--ink)}\n.kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;\n        color:var(--muted);margin:0 0 14px}\nheader.top h1{font-family:var(--serif);font-size:clamp(2.1rem,5vw,3.1rem);line-height:1.04;\n              margin:0 0 18px;font-weight:600;letter-spacing:-.015em;text-wrap:balance}\n.stats{display:flex;flex-wrap:wrap;gap:0 34px;font-family:var(--mono);font-size:12.5px;\n       color:var(--muted);font-variant-numeric:tabular-nums}\n.stats b{color:var(--ink);font-weight:600}\n.stats .hot b{color:var(--signal)}\n.cols{display:grid;grid-template-columns:1fr;gap:40px;margin-top:40px}\n@media(min-width:940px){.cols{grid-template-columns:216px 1fr;gap:56px}\n  nav.idx{position:sticky;top:24px;align-self:start;max-height:calc(100vh - 48px);overflow-y:auto}}\nnav.idx h2{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;\n           color:var(--muted);margin:0 0 14px;font-weight:500}\nnav.idx ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}\nnav.idx a{display:flex;justify-content:space-between;align-items:baseline;gap:10px;\n          text-decoration:none;color:var(--ink);padding:7px 0;border-bottom:1px solid var(--rule);font-size:14.5px}\nnav.idx a:hover,nav.idx a:focus-visible{color:var(--accent)}\nnav.idx .n{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}\nnav.idx .d{color:var(--signal)}\nsection.cat{margin:0 0 8px;scroll-margin-top:20px}\nsection.cat > h2{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.14em;\n   text-transform:uppercase;color:var(--accent);margin:44px 0 0;padding-bottom:10px;\n   border-bottom:1px solid var(--accent)}\narticle.story{display:grid;grid-template-columns:52px 1fr;gap:20px;padding:26px 0;border-bottom:1px solid var(--rule)}\n@media(max-width:620px){article.story{grid-template-columns:1fr;gap:10px}}\n.gutter{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;\n        padding-top:5px;line-height:1.3}\n.gutter .big{display:block;font-size:20px;color:var(--ink);font-weight:600}\n.gutter .lbl{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase}\n.story h3{font-family:var(--serif);font-size:1.32rem;line-height:1.28;margin:0 0 9px;\n          font-weight:600;letter-spacing:-.008em;text-wrap:balance}\n.why{margin:0 0 14px;color:var(--muted);font-size:15px}\n.outlets{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}\n.outlets a{font-family:var(--mono);font-size:11.5px;padding:3.5px 9px;border:1px solid var(--rule);\n           border-radius:2px;color:var(--muted);background:var(--raise);text-decoration:none;\n           display:inline-flex;align-items:center;gap:5px;transition:border-color .12s,color .12s}\n.outlets a:hover,.outlets a:focus-visible{color:var(--accent);border-color:var(--accent)}\n.outlets a::after{content:\"\\\\2197\";font-size:10px;opacity:.65}\n.diverge{background:var(--signal-bg);border-left:3px solid var(--signal);padding:13px 16px;\n         margin:0 0 14px;border-radius:0 3px 3px 0}\n.diverge .dh{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;\n             color:var(--signal);font-weight:600;margin:0 0 9px}\n.diverge .aspect{font-size:14px;font-weight:600;margin:0 0 7px}\n.diverge + .diverge{margin-top:-6px}\ntable.recon{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px;\n            font-variant-numeric:tabular-nums}\ntable.recon td{padding:3px 0;vertical-align:baseline}\ntable.recon td.src{color:var(--muted);white-space:nowrap;padding-right:16px;width:1%}\ntable.recon td.val{color:var(--ink);font-weight:600}\ndetails.more{margin:12px 0 0;border-top:1px dashed var(--rule);padding-top:11px}\ndetails.more summary{font-family:var(--mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;\n   color:var(--muted);cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:7px}\ndetails.more summary::-webkit-details-marker{display:none}\ndetails.more summary::before{content:\"+\";font-size:14px;line-height:1}\ndetails.more[open] summary::before{content:\"\\\\2212\"}\ndetails.more summary:hover,details.more summary:focus-visible{color:var(--accent)}\n.mblock{margin:15px 0 0}\n.mblock h4{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;\n           color:var(--muted);margin:0 0 5px;font-weight:500}\n.mblock p{margin:0 0 11px;font-size:15px;line-height:1.6}\n.mblock p:last-child{margin-bottom:0}\n.mblock p b{font-weight:600}\n.tail{margin:14px 0 0;font-family:var(--mono);font-size:11px;color:var(--muted)}\nfooter{margin-top:60px;padding-top:22px;border-top:1px solid var(--rule);\n       font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.7}\na:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}\n@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}\n`;\n\nconst MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];\nfunction fechaLarga(iso) {\n  const [y, m, d] = String(iso).split('-').map(Number);\n  return `${d} de ${MESES[m - 1]} de ${y}`;\n}\n\nfunction renderHTML(b) {\n  const o = [];\n  o.push(`<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">`);\n  o.push(`<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">`);\n  o.push(`<title>Briefing · ${fechaLarga(b.fecha)}</title><style>${CSS}</style></head><body>`);\n  o.push('<div class=\"wrap\">');\n  o.push('<header class=\"top\">');\n  o.push(`<p class=\"kicker\">news-briefing-ai · ${esc(fechaLarga(b.fecha))}</p>`);\n  o.push('<h1>Dónde coinciden los medios,<br>y dónde no</h1>');\n  o.push('<div class=\"stats\">'\n    + `<span><b>${b.items.length}</b> acontecimientos</span>`\n    + `<span><b>${b.nMedios}</b> medios contrastados</span>`\n    + `<span class=\"hot\"><b>${b.nDiv}</b> divergencias numéricas</span>`\n    + '</div>');\n  o.push('</header>');\n\n  o.push('<div class=\"cols\"><nav class=\"idx\"><h2>Índice</h2><ol>');\n  for (const c of b.cats) {\n    const nd = b.porCat[c].reduce((s, x) => s + x.fuertes.length, 0);\n    const dot = nd ? `<span class=\"d\">◆${nd}</span>` : '';\n    o.push(`<li><a href=\"#c-${c}\">${esc(CAT_LABEL[c] || c)}<span class=\"n\">${dot} ${b.porCat[c].length}</span></a></li>`);\n  }\n  o.push('</ol></nav><main>');\n\n  for (const c of b.cats) {\n    o.push(`<section class=\"cat\" id=\"c-${c}\"><h2>${esc(CAT_LABEL[c] || c)}</h2>`);\n    for (const it of b.porCat[c]) {\n      const a = it.analysis;\n      const interp = a.interpretaciones || [];\n      o.push('<article class=\"story\">');\n      o.push(`<div class=\"gutter\"><span class=\"big\">${it.source_count}</span>`\n        + `<span class=\"lbl\">${it.source_count > 1 ? 'medios' : 'medio'}</span></div><div>`);\n      o.push(`<h3>${esc(a.que_paso)}</h3>`);\n      if (a.por_que_importa) o.push(`<p class=\"why\">${esc(a.por_que_importa)}</p>`);\n      // La caja de cada medio ES el enlace a su artículo: antes se pintaba la\n      // lista de medios y debajo otra vez la lista de enlaces, con los mismos\n      // nombres repetidos. Un artículo por medio, en el orden de las fuentes.\n      const porMedio = new Map();\n      for (const art of it.articles) if (!porMedio.has(art.source_name)) porMedio.set(art.source_name, art.link);\n      o.push('<div class=\"outlets\">' + [...porMedio].map(([medio, link]) =>\n        `<a href=\"${esc(link)}\" target=\"_blank\" rel=\"noopener\">${esc(medio)}</a>`).join('') + '</div>');\n\n      for (const d of it.fuertes) {\n        o.push('<div class=\"diverge\"><p class=\"dh\">◆ Las cifras no coinciden</p>');\n        o.push(`<p class=\"aspect\">${esc(d.aspecto)}</p><table class=\"recon\">`);\n        for (const [k, v] of Object.entries(d.version_por_fuente || {})) {\n          o.push(`<tr><td class=\"src\">${esc(k)}</td><td class=\"val\">${esc(v)}</td></tr>`);\n        }\n        o.push('</table></div>');\n      }\n\n      // \"Ver más\" solo existe si 05 escribió un desarrollo con sustancia. Cuando\n      // las fuentes son teasers de RSS escuetos, 05 devuelve una línea o nada —\n      // correctamente, porque forzarle una extensión mínima le hacía inventar.\n      // En ese caso no se ofrece un desplegable que no aporta.\n      const desarrollo = Array.isArray(a.desarrollo) ? a.desarrollo.join('\\n\\n') : (a.desarrollo || '');\n      const parrafos = desarrollo.split(/\\n\\s*\\n/).map(p => p.trim()).filter(Boolean);\n      const palabras = desarrollo.split(/\\s+/).filter(Boolean).length;\n      if (parrafos.length && palabras >= 25) {\n        o.push('<details class=\"more\"><summary>Ver más</summary><div class=\"mblock\">');\n        for (const p of parrafos) o.push(`<p>${esc(p)}</p>`);\n        o.push('</div><p class=\"tail\">Para ir más allá, las fuentes originales están arriba.</p></details>');\n      }\n      o.push('</div></article>');\n    }\n    o.push('</section>');\n  }\n  o.push('</main></div>');\n  o.push(`<footer>Generado por news-briefing-ai a partir de ${b.items.length} acontecimientos cubiertos por 2 o más medios.<br>`\n    + `De las ${b.nDiv + b.nDesc} discrepancias que detectó el análisis, solo ${b.nDiv} son contradicciones numéricas reales; `\n    + `el resto son matices de redacción o coberturas desiguales y no se muestran.<br>`\n    + `El sistema no sustituye al periodismo: cada pieza enlaza a sus fuentes originales.</footer>`);\n  o.push('</div></body></html>');\n  return o.join('\\n');\n}\n\n// --- Entrada/salida del nodo -------------------------------------------------\nconst filas = $input.all().map(i => i.json);\n\n// Fecha del briefing en día natural UTC, el mismo corte que usa la consulta de\n// selección y que el tope diario de 05. Un corte distinto aquí desalinearía el\n// nombre del briefing respecto a su contenido.\nconst fecha = new Date().toISOString().slice(0, 10);\n\nconst b = construirBriefing(filas, fecha);\nconst html = renderHTML(b);\n\n// El payload guarda la selección ya clasificada, no el HTML: es lo que permite\n// re-renderizar a otro formato sin volver a analizar nada.\nconst payload = {\n  fecha: b.fecha,\n  orden_categorias: b.cats,\n  medios: b.nMedios,\n  discrepancias_descartadas: b.nDesc,\n  items: b.items.map(it => ({\n    id: it.id, categoria: it.categoria, source_count: it.source_count,\n    sources: it.sources, articles: it.articles, analysis: it.analysis,\n    divergencias_numericas: it.fuertes\n  }))\n};\n\nreturn [{\n  json: {\n    briefing_date: b.fecha,\n    cluster_count: b.items.length,\n    divergence_count: b.nDiv,\n    payload: JSON.stringify(payload),\n    content_html: html\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "n08-build",
+      "name": "Build Briefing Document"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- briefing_date es UNIQUE: regenerar el briefing del mismo día reemplaza el\n-- anterior en vez de duplicarlo, así que 08 es idempotente y reejecutable.\nINSERT INTO briefings (briefing_date, cluster_count, divergence_count, payload, content_html)\nVALUES ($1, $2, $3, $4::jsonb, $5)\nON CONFLICT (briefing_date) DO UPDATE SET\n    cluster_count    = EXCLUDED.cluster_count,\n    divergence_count = EXCLUDED.divergence_count,\n    payload          = EXCLUDED.payload,\n    content_html     = EXCLUDED.content_html,\n    generated_at     = now()\nRETURNING id, briefing_date, cluster_count, divergence_count, length(content_html) AS html_bytes;",
+        "options": {
+          "queryReplacement": "=={{ [$json.briefing_date, $json.cluster_count, $json.divergence_count, $json.payload, $json.content_html] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        0
+      ],
+      "id": "n08-store",
+      "name": "Store Briefing",
+      "credentials": {
+        "postgres": {
+          "id": "z9SLVuZpj5X17xUz",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get Today's Analyses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today's Analyses": {
+      "main": [
+        [
+          {
+            "node": "Anything to Brief Today?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything to Brief Today?": {
+      "main": [
+        [
+          {
+            "node": "Build Briefing Document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to Brief Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Briefing Document": {
+      "main": [
+        [
+          {
+            "node": "Store Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7a647c49-351b-49a2-96d9-b98cec543020",
+  "meta": null,
+  "nodeGroups": [],
+  "id": "0dEHfviDPUxZ6WH9",
+  "tags": []
+}

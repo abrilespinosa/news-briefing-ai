@@ -33,10 +33,10 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 | 05 | Análisis LLM | ✅ Implementado | [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md) |
 | 06 | Quality Filter | ✅ Implementado | [`docs/06-quality-filter.md`](docs/06-quality-filter.md) |
 | 07 | Categorización | ✅ Implementado | [`docs/07-categorization.md`](docs/07-categorization.md) |
-| 08 | Construcción del briefing | ⏳ Roadmap | — |
+| 08 | Construcción del briefing | ✅ Implementado | [`docs/08-briefing-builder.md`](docs/08-briefing-builder.md) |
 | 09 | Entrega | ⏳ Roadmap | — |
 
-**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica y agrupa noticias del mismo acontecimiento entre 8 fuentes, genera dos tipos de análisis LLM —comparación entre medios para lo corroborado por varias fuentes, y filtrado para lo publicado por una sola— y clasifica ambas ramas bajo una misma taxonomía temática. Todavía no ensambla ni entrega el briefing final.**
+**Con el estado actual del repositorio, el sistema ingiere, normaliza, deduplica y agrupa noticias del mismo acontecimiento entre 8 fuentes, las analiza comparando cómo las cubre cada medio, las clasifica por tema y ensambla un briefing diario en HTML que destaca las cifras en las que los medios se contradicen. Lo que falta es entregarlo: hoy el documento se queda en la base de datos.**
 
 ---
 
@@ -44,10 +44,10 @@ Arquitectura de pipeline en 10 fases, implementada como sub-workflows independie
 
 Cada fase es un sub-workflow de n8n independiente, invocado mediante `Execute Workflow Trigger`. Esta modularidad es deliberada: cada fase se puede testear, depurar y versionar de forma aislada, en vez de mantener un único canvas monolítico.
 
-El orquestador (fase 00) dispara a diario `05` y después `07`; las fases `01`–`04` se invocan en cascada desde `05`.
+El orquestador (fase 00) dispara a diario `05`, después `07` y finalmente `08`; las fases `01`–`04` se invocan en cascada desde `05`.
 
 ```
-00 · Orquestador ── Schedule Trigger diario (cron 0 7 * * *) → 05 → 07
+00 · Orquestador ── Schedule Trigger diario (cron 0 7 * * *) → 05 → 07 → 08
       │
       ▼
 01 · Ingesta ──── RSS multi-fuente (El País, elDiario.es, El Mundo, ABC, 20minutos, La Vanguardia, Europa Press, El Español)
@@ -72,7 +72,8 @@ El orquestador (fase 00) dispara a diario `05` y después `07`; las fases `01`�
 07 · Categorización ── Groq (llama-3.1-8b-instant), asigna tema a cada cluster multi-fuente; lee de cluster_analysis, no encadena a 05
       │
       ▼
-08 · Briefing Builder ⏳
+08 · Briefing Builder ── ensamblaje determinista (sin LLM): índice por temas, orden por nº de medios,
+                       tabla de conciliación de cifras discrepantes; HTML autocontenido en Postgres
       │
       ▼
 09 · Entrega ⏳
@@ -128,8 +129,8 @@ En n8n, crea una credencial `Header Auth` llamada "Groq API" (`Authorization` / 
 
 Los workflows implementados están exportados en [`workflows/`](workflows/):
 
-1. En n8n, `⋮` → `Import from File` → importa **de abajo arriba**: `01-ingestion-rss.json`, `02-normalization.json`, `03-deduplication.json`, `04-clustering.json`, `05-llm-analysis.json`, `06-quality-filter.json`, `07-categorization.json` y por último `00-orchestrator-main.json`
-2. Publica los ocho workflows (`Publish` en la esquina superior derecha del editor), **en ese mismo orden**. Publicar es obligatorio para el auto-encadenado de `05` y `06`, y n8n rechaza publicar un workflow que referencie sub-workflows sin publicar — por eso `00` va el último
+1. En n8n, `⋮` → `Import from File` → importa **de abajo arriba**: `01-ingestion-rss.json`, `02-normalization.json`, `03-deduplication.json`, `04-clustering.json`, `05-llm-analysis.json`, `06-quality-filter.json`, `07-categorization.json`, `08-briefing-builder.json` y por último `00-orchestrator-main.json`
+2. Publica los nueve workflows (`Publish` en la esquina superior derecha del editor), **en ese mismo orden**. Publicar es obligatorio para el auto-encadenado de `05` y `06`, y n8n rechaza publicar un workflow que referencie sub-workflows sin publicar — por eso `00` va el último
 3. Asigna la credencial "Groq API" a los nodos "Call Groq for Analysis" (en `05-llm-analysis`), "Call Groq for Filtering" (en `06-quality-filter`) y "Call Groq for Categorization" (en `07-categorization`)
 
 Las fases `01`–`06` invocan a la anterior internamente (`Execute Workflow`), así que no hace falta ejecutarlas por separado: ejecuta `05-llm-analysis` para el briefing principal (clusters multi-fuente) o `06-quality-filter` para el secundario (fuente única) — ambos disparan `01`→`04` internamente.
@@ -171,7 +172,8 @@ news-briefing-ai/
     ├── 04-clustering.json
     ├── 05-llm-analysis.json
     ├── 06-quality-filter.json
-    └── 07-categorization.json
+    ├── 07-categorization.json
+    └── 08-briefing-builder.json
 ```
 
 ---
@@ -184,15 +186,19 @@ Cosas implementadas y documentadas cuyo comportamiento **todavía no se ha obser
 - **Ruta de error de la llamada a 05 desde el orquestador**: cableada para que 07 corra igualmente, nunca ejercitada.
 - **Corrección del tope diario autobloqueante** (ventana deslizante → día natural UTC): aplicada, pendiente de confirmar con la primera corrida programada que sí analice.
 - **Divergencia conocida entre 06 y 07**: la regla de desempate de `internacional` introducida en 07 no está replicada en 06, que sigue pausado. Hay que replicarla antes de reanudarlo o las dos secciones del briefing usarán criterios distintos para la misma etiqueta.
+- **Campo `desarrollo` de 05 en producción**: validado con llamadas directas a Groq sobre clusters reales (rico y pobre), pero ningún análisis guardado lo tiene todavía — se añadió después de la última corrida. Hasta que 05 vuelva a analizar, el briefing no muestra el desplegable "Ver más".
+- **Techo proporcional de `desarrollo`**: los umbrales (1.500 y 4.000 caracteres) se calibraron con dos clusters, uno en cada extremo. Conviene revisarlos con una jornada entera antes de darlos por buenos.
 
 ## Roadmap técnico
 
 Decisiones ya tomadas para fases futuras, pendientes de implementar:
 
 - **Identidad persistente de eventos**: hoy el clustering compara artículos dentro de una ventana de 24h; un evento en desarrollo durante varios días (ej. cobertura de un incendio) no se vincula todavía con artículos de días anteriores.
-- **Fase 08 (Briefing Builder)**: cómo combinar `cluster_analysis` (05 + 07, briefing principal por temas) y `secondary_briefing_items` (06, sección secundaria) en el documento final — todavía sin diseñar. Ya no tiene que preocuparse de análisis duplicados del mismo suceso: eso se resolvió en el origen (05 marca como `superseded` el análisis que otro con más fuentes deja obsoleto, ver [`docs/05-llm-analysis.md`](docs/05-llm-analysis.md)), así que a 08 le basta con filtrar `status = 'ok'`.
+- **Fase 09 (Entrega)**: decidido el destino — n8n sirviendo el HTML por webhook, más un aviso a Telegram con el índice del día y el enlace. Telegram no admite tablas, así que el documento completo vive en la web y el mensaje es solo notificación.
+- **Extracción de contenido completo** (Mozilla Readability o `trafilatura`, en un contenedor aparte): hoy 05 analiza el teaser del RSS, no el artículo. El Mundo entrega 174 caracteres de media frente a los 6.236 de elDiario.es, y 6 de cada 25 clusters se quedan sin material suficiente para un cuerpo de noticia. **Implica revisar el principio "solo RSS, sin scraping"**, así que es una decisión de filosofía del proyecto y no solo técnica.
+- **Distinguir en 05 discrepancia de precisión de contradicción factual**: hoy el 100% de los clusters reporta alguna discrepancia y solo el 20% son contradicciones reales. La fase 08 las separa con reglas deterministas, pero el arreglo de fondo es el prompt de 05.
+- **Agente de investigación sobre `preguntas_abiertas`**: 05 ya registra por cluster lo que ninguna fuente resuelve. Es el material de partida para un agente que busque esas respuestas.
 - **Cola de revisión humana asíncrona**, no bloqueante — nunca debe frenar la ejecución automática diaria.
-- **Extracción de contenido completo** del artículo (más allá del resumen del RSS) para dar más contexto al análisis LLM.
 - **Índice ANN (`ivfflat`/`hnsw`) sobre `pgvector`** si el volumen de artículos crece lo suficiente para que el self-join de similitud deje de ser trivial (ya migrado a `pgvector`; ver [`docs/04-clustering.md`](docs/04-clustering.md)).
 
 ---
